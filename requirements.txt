@@ -1,0 +1,5 @@
+openai-agents
+python-dotenv
+requests
+feedparser
+beautifulsoup4
