@@ -2,7 +2,71 @@
 import streamlit as st
 import os
 import tempfile
+import re
+import contextlib
+from urllib.parse import urlparse
 from blog_orchestrator import BlogAgentOrchestrator
+
+@contextlib.contextmanager
+def temporary_env_var(key, value):
+    """Securely set temporary environment variable with guaranteed cleanup."""
+    old_value = os.environ.get(key)
+    try:
+        os.environ[key] = value
+        yield
+    finally:
+        if old_value is None:
+            os.environ.pop(key, None)
+        else:
+            os.environ[key] = old_value
+
+def validate_blog_url(url):
+    """Validate and sanitize blog URL input to prevent SSRF attacks."""
+    if not url or not url.strip():
+        return None
+    
+    url = url.strip()
+    
+    # Add https:// if no protocol specified
+    if not url.startswith(('http://', 'https://')):
+        url = 'https://' + url
+    
+    # Basic URL format validation
+    url_pattern = re.compile(
+        r'^https?://'  # http:// or https://
+        r'(?:(?:[A-Z0-9](?:[A-Z0-9-]{0,61}[A-Z0-9])?\.)+[A-Z]{2,6}\.?|'  # domain
+        r'\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})'  # IP
+        r'(?::\d+)?'  # optional port
+        r'(?:/?|[/?]\S+)$', re.IGNORECASE)
+    
+    if not url_pattern.match(url):
+        raise ValueError("Invalid URL format")
+    
+    parsed = urlparse(url)
+    
+    # Block internal/private IP ranges and localhost
+    if parsed.hostname:
+        hostname = parsed.hostname.lower()
+        
+        # Block localhost and loopback
+        if hostname in ['localhost', '127.0.0.1', '0.0.0.0', '::1']:
+            raise ValueError("Access to localhost is not allowed")
+        
+        # Block private IP ranges
+        if (hostname.startswith('10.') or 
+            hostname.startswith('172.16.') or hostname.startswith('172.17.') or 
+            hostname.startswith('172.18.') or hostname.startswith('172.19.') or
+            hostname.startswith('172.2') or hostname.startswith('172.3') or
+            hostname.startswith('192.168.') or
+            hostname == '169.254.169.254'):  # AWS metadata endpoint
+            raise ValueError("Access to private network ranges is not allowed")
+    
+    return url
+
+# Security constants
+MAX_TOPIC_LENGTH = 500
+MAX_REQUIREMENTS_LENGTH = 2000
+MAX_API_KEY_LENGTH = 200
 
 def main():
     st.set_page_config(
@@ -22,6 +86,7 @@ def main():
         api_key = st.text_input(
             "OpenAI API Key",
             type="password",
+            max_chars=MAX_API_KEY_LENGTH,
             help="Your OpenAI API key for the Agents SDK"
         )
         
@@ -36,6 +101,14 @@ def main():
         if not api_key:
             st.warning("⚠️ Please enter your OpenAI API key to continue")
             st.stop()
+            
+        # Validate reference blog URL
+        if reference_blog:
+            try:
+                reference_blog = validate_blog_url(reference_blog)
+            except ValueError as e:
+                st.error(f"🚫 Invalid blog URL: {e}")
+                st.stop()
     
     # Main content area
     col1, col2 = st.columns([1, 1])
@@ -47,7 +120,8 @@ def main():
         topic = st.text_area(
             "Blog Topic",
             height=100,
-            placeholder="Enter your blog topic (e.g., 'The Future of Remote Work')",
+            max_chars=MAX_TOPIC_LENGTH,
+            placeholder=f"Enter your blog topic (max {MAX_TOPIC_LENGTH} characters)",
             help="The main subject for your blog post"
         )
         
@@ -55,11 +129,14 @@ def main():
         requirements = st.text_area(
             "Additional Requirements",
             height=150,
-            placeholder="""- Target audience: [your audience]
+            max_chars=MAX_REQUIREMENTS_LENGTH,
+            placeholder=f"""- Target audience: [your audience]
 - Include practical examples
 - Keep under [word count] words
 - Add call-to-action
-- Focus on [specific aspect]""",
+- Focus on [specific aspect]
+
+(max {MAX_REQUIREMENTS_LENGTH} characters)""",
             help="Specific requirements for your blog post"
         )
         
@@ -74,33 +151,45 @@ def main():
         st.header("📊 Output")
         
         if generate_button:
+            # Server-side validation
             if not topic.strip():
                 st.error("❌ Please enter a topic for your blog post")
                 return
             
-            # Set API key as environment variable temporarily
-            os.environ["OPENAI_API_KEY"] = api_key
+            if len(topic.strip()) > MAX_TOPIC_LENGTH:
+                st.error(f"❌ Topic too long. Maximum {MAX_TOPIC_LENGTH} characters allowed.")
+                return
+                
+            if len(requirements) > MAX_REQUIREMENTS_LENGTH:
+                st.error(f"❌ Requirements too long. Maximum {MAX_REQUIREMENTS_LENGTH} characters allowed.")
+                return
+                
+            if len(api_key) > MAX_API_KEY_LENGTH:
+                st.error("❌ Invalid API key format.")
+                return
             
             try:
-                # Initialize orchestrator
-                orchestrator = BlogAgentOrchestrator()
-                
-                # Progress tracking
-                progress_bar = st.progress(0)
-                status_text = st.empty()
-                
-                # Callback function to update status
-                def update_status(message, progress):
-                    status_text.text(message)
-                    progress_bar.progress(progress)
-                
-                # Generate blog post with real-time updates
-                results = orchestrator.create_blog_post(
-                    topic=topic,
-                    reference_blog=reference_blog,
-                    requirements=requirements,
-                    status_callback=update_status
-                )
+                # Use secure context manager for API key
+                with temporary_env_var("OPENAI_API_KEY", api_key):
+                    # Initialize orchestrator
+                    orchestrator = BlogAgentOrchestrator()
+                    
+                    # Progress tracking
+                    progress_bar = st.progress(0)
+                    status_text = st.empty()
+                    
+                    # Callback function to update status
+                    def update_status(message, progress):
+                        status_text.text(message)
+                        progress_bar.progress(progress)
+                    
+                    # Generate blog post with real-time updates
+                    results = orchestrator.create_blog_post(
+                        topic=topic,
+                        reference_blog=reference_blog,
+                        requirements=requirements,
+                        status_callback=update_status
+                    )
                 
                 # Display results
                 if "error" in results:
@@ -199,13 +288,8 @@ def main():
                             st.info("SEO analysis not available")
                         
             except Exception as e:
-                st.error(f"❌ An error occurred: {str(e)}")
+                st.error(f"❌ An error occurred. Please check your inputs and try again.")
                 st.info("💡 Make sure your OpenAI API key is valid and has access to the Agents API")
-            
-            finally:
-                # Clean up environment variable
-                if "OPENAI_API_KEY" in os.environ:
-                    del os.environ["OPENAI_API_KEY"]
     
     # Footer
     st.markdown("---")
