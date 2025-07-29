@@ -119,6 +119,43 @@ class BlogAgentOrchestrator:
                 - Consider SEO and AI visibility
                 - Preserve any internal links that have been added
                 """
+            ),
+            "seo_analyzer": Agent(
+                name="SEO Content Analyzer",
+                instructions="""You are an SEO analysis specialist that evaluates blog content.
+                
+                Your tasks:
+                1. Analyze the final blog post for SEO best practices
+                2. Provide specific, actionable recommendations
+                3. Give an overall SEO score and breakdown
+                
+                Evaluation criteria:
+                - Title optimization (length, keywords, compelling)
+                - Heading structure (H1, H2, H3 hierarchy)
+                - Content length and readability
+                - Keyword usage and density
+                - Internal linking effectiveness
+                - Meta description potential
+                - Content structure and scannability
+                - Search intent alignment
+                
+                Return analysis in this format:
+                SEO SCORE: [X/100]
+                
+                STRENGTHS:
+                ✅ [What's working well]
+                
+                IMPROVEMENTS:
+                ⚠️ [Specific actionable recommendations]
+                
+                TITLE ANALYSIS: [Assessment and suggestions]
+                CONTENT STRUCTURE: [Heading hierarchy, readability]
+                KEYWORD USAGE: [Natural integration assessment]
+                INTERNAL LINKS: [Link quality and relevance]
+                
+                QUICK WINS:
+                - [1-3 easy improvements for immediate SEO gains]
+                """
             )
         }
     
@@ -291,8 +328,27 @@ class BlogAgentOrchestrator:
             editing_result = self._run_agent_safely(self.agents["editor"], editing_prompt)
             results["final"] = editing_result.final_output
             
+            # Step 7: SEO Analysis
             if status_callback:
-                status_callback("✅ Blog post completed!", 100)
+                status_callback("📊 Analyzing SEO performance...", 95)
+            print("📊 Analyzing SEO performance...")
+            seo_prompt = f"""
+            Analyze this final blog post for SEO best practices and provide actionable recommendations:
+            
+            BLOG POST TO ANALYZE:
+            {editing_result.final_output}
+            
+            TARGET TOPIC: {topic}
+            PUBLICATION STYLE: {reference_blog}
+            
+            Provide a comprehensive SEO analysis with specific recommendations for improvement.
+            """
+            
+            seo_result = self._run_agent_safely(self.agents["seo_analyzer"], seo_prompt)
+            results["seo_analysis"] = seo_result.final_output
+            
+            if status_callback:
+                status_callback("✅ Blog post completed with SEO analysis!", 100)
             
             return results
             

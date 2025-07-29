@@ -115,7 +115,7 @@ def main():
                         else:
                             st.success("✅ **CLEAR**: No duplicate content detected.")
                     # Tabs for different outputs
-                    tab1, tab2, tab3 = st.tabs(["📄 Final Post", "🎨 Style Guide", "🔍 Research & Analysis"])
+                    tab1, tab2, tab3, tab4 = st.tabs(["📄 Final Post", "🎨 Style Guide", "🔍 Research & Analysis", "📊 SEO Analysis"])
                     
                     with tab1:
                         st.markdown("### Final Blog Post")
@@ -165,6 +165,38 @@ def main():
                             disabled=True,
                             key="research_area"
                         )
+                    
+                    with tab4:
+                        st.markdown("### SEO Performance Analysis")
+                        
+                        if "seo_analysis" in results:
+                            # Parse SEO score if available
+                            seo_text = results["seo_analysis"]
+                            if "SEO SCORE:" in seo_text:
+                                try:
+                                    score_line = [line for line in seo_text.split('\n') if 'SEO SCORE:' in line][0]
+                                    score = score_line.split(':')[1].strip().split('/')[0]
+                                    score_num = int(score)
+                                    
+                                    # Color-coded score display
+                                    if score_num >= 80:
+                                        st.success(f"🎯 **SEO Score: {score}/100** - Excellent!")
+                                    elif score_num >= 60:
+                                        st.warning(f"⚠️ **SEO Score: {score}/100** - Good with room for improvement")
+                                    else:
+                                        st.error(f"🔴 **SEO Score: {score}/100** - Needs optimization")
+                                except:
+                                    pass
+                            
+                            st.text_area(
+                                "SEO Analysis & Recommendations",
+                                value=results["seo_analysis"],
+                                height=400,
+                                disabled=True,
+                                key="seo_area"
+                            )
+                        else:
+                            st.info("SEO analysis not available")
                         
             except Exception as e:
                 st.error(f"❌ An error occurred: {str(e)}")
