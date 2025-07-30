@@ -161,7 +161,7 @@ def main():
         generate_button = st.button(
             "🚀 Generate Blog Post",
             type="primary",
-            disabled=not (api_key and topic.strip())
+            disabled=not (api_key and topic.strip() and reference_blog.strip())
         )
     
     with col2:
@@ -171,6 +171,10 @@ def main():
             # Server-side validation
             if not topic.strip():
                 st.error("❌ Please enter a topic for your blog post")
+                return
+            
+            if not reference_blog.strip():
+                st.error("❌ Please enter a reference blog URL for style matching")
                 return
             
             if len(topic.strip()) > MAX_TOPIC_LENGTH:
@@ -225,7 +229,13 @@ def main():
                     
                     with tab1:
                         st.markdown("### Final Blog Post")
-                        st.markdown(results["final"])
+                        st.text_area(
+                            "Generated Blog Post",
+                            value=results["final"],
+                            height=500,
+                            disabled=False,
+                            help="You can copy or edit the final blog post"
+                        )
                         
                         # Download button
                         st.download_button(
@@ -241,8 +251,9 @@ def main():
                         st.text_area(
                             "Style Guide",
                             value=results["style_guide"],
-                            height=300,
-                            disabled=True
+                            height=400,
+                            disabled=False,
+                            help="You can copy text from this field"
                         )
                     
                     with tab3:
@@ -255,9 +266,10 @@ def main():
                                 st.text_area(
                                     "Duplication Analysis Results",
                                     value=results["duplication_check"],
-                                    height=200,
-                                    disabled=True,
-                                    key="duplication_area"
+                                    height=250,
+                                    disabled=False,
+                                    key="duplication_area",
+                                    help="You can copy text from this field"
                                 )
                         else:
                             st.info("Duplication check data not available")
@@ -267,9 +279,10 @@ def main():
                         st.text_area(
                             "Research Results",
                             value=results["research"],
-                            height=300,
-                            disabled=True,
-                            key="research_area"
+                            height=350,
+                            disabled=False,
+                            key="research_area",
+                            help="You can copy text from this field"
                         )
                     
                     with tab4:
@@ -297,9 +310,10 @@ def main():
                             st.text_area(
                                 "SEO Analysis & Recommendations",
                                 value=results["seo_analysis"],
-                                height=400,
-                                disabled=True,
-                                key="seo_area"
+                                height=450,
+                                disabled=False,
+                                key="seo_area",
+                                help="You can copy text from this field"
                             )
                         else:
                             st.info("SEO analysis not available")

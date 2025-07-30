@@ -2,6 +2,7 @@
 import asyncio
 import threading
 from typing import Dict, List
+from concurrent.futures import ThreadPoolExecutor, TimeoutError as FutureTimeoutError
 from dotenv import load_dotenv
 from agents import Agent, Runner, WebSearchTool
 
@@ -11,6 +12,9 @@ class BlogAgentOrchestrator:
     def __init__(self, model="gpt-4o"):
         # Store the model for all agents
         self.model = model
+        
+        # Thread pool for agent execution (prevents resource leaks)
+        self._thread_pool = ThreadPoolExecutor(max_workers=4, thread_name_prefix="agent-")
         
         # Specialist agents
         self.agents = {
@@ -169,45 +173,47 @@ class BlogAgentOrchestrator:
             )
         }
     
-    def _run_agent_safely(self, agent, prompt):
-        """Run agent with proper event loop handling for Streamlit compatibility."""
-        try:
-            # Check if we're in a thread without an event loop
+    def _run_agent_safely(self, agent, prompt, timeout_seconds=300):
+        """Run agent with Streamlit thread compatibility and proper resource management."""
+        
+        def run_in_thread():
+            """Run the agent in a separate thread with its own event loop."""
+            loop = None
             try:
-                loop = asyncio.get_event_loop()
-            except RuntimeError:
-                # No event loop in current thread, create one
+                # Create new event loop for this thread
                 loop = asyncio.new_event_loop()
                 asyncio.set_event_loop(loop)
-            
-            return Runner.run_sync(agent, prompt)
-            
-        except Exception as e:
-            # If still failing, try running in a new thread with its own event loop
-            if "event loop" in str(e).lower():
-                result = {"error": None, "output": None}
-                
-                def run_in_thread():
+                result = Runner.run_sync(agent, prompt)
+                return {"success": True, "result": result}
+            except Exception as e:
+                return {"success": False, "error": e}
+            finally:
+                # Ensure event loop is properly cleaned up
+                if loop is not None:
                     try:
-                        loop = asyncio.new_event_loop()
-                        asyncio.set_event_loop(loop)
-                        result["output"] = Runner.run_sync(agent, prompt)
-                    except Exception as thread_e:
-                        result["error"] = thread_e
-                    finally:
                         loop.close()
-                
-                thread = threading.Thread(target=run_in_thread)
-                thread.start()
-                thread.join()
-                
-                if result["error"]:
-                    raise result["error"]
-                return result["output"]
-            else:
-                raise e
+                    except Exception:
+                        pass  # Ignore cleanup errors
+        
+        # Use ThreadPoolExecutor for proper resource management
+        try:
+            future = self._thread_pool.submit(run_in_thread)
+            data = future.result(timeout=timeout_seconds)
+        except FutureTimeoutError:
+            raise TimeoutError(f"Agent '{agent.name}' execution timed out after {timeout_seconds} seconds")
+        
+        if not data["success"]:
+            print(f"❌ Agent '{agent.name}' execution failed: {data['error']}")
+            raise data["error"]
+        
+        return data["result"]
+    
+    def __del__(self):
+        """Cleanup thread pool on destruction."""
+        if hasattr(self, '_thread_pool'):
+            self._thread_pool.shutdown(wait=True)
 
-    def create_blog_post(self, topic: str, reference_blog: str = "TechCrunch.com", requirements: str = "", status_callback=None) -> Dict[str, str]:
+    def create_blog_post(self, topic: str, reference_blog: str, requirements: str = "", status_callback=None) -> Dict[str, str]:
         """Create a blog post that matches the style of a reference publication."""
         results = {}
         
@@ -387,7 +393,7 @@ class BlogAgentOrchestrator:
         print("✅ Parallel research completed")
         return results
     
-    def analyze_blog_style(self, blog_source: str = "TechCrunch.com", status_callback=None) -> str:
+    def analyze_blog_style(self, blog_source: str, status_callback=None) -> str:
         """Analyze the writing style of a specified blog or publication."""
         if status_callback:
             status_callback(f"🎨 Fetching articles from {blog_source}...", 15)
@@ -415,7 +421,7 @@ class BlogAgentOrchestrator:
             print(f"❌ Style analysis failed: {e}")
             return f"Style analysis failed: {e}"
     
-    def create_style_matched_post(self, topic: str, reference_blog: str = "TechCrunch.com", requirements: str = "") -> Dict[str, str]:
+    def create_style_matched_post(self, topic: str, reference_blog: str, requirements: str = "") -> Dict[str, str]:
         """Alias for create_blog_post for backward compatibility."""
         return self.create_blog_post(topic, reference_blog, requirements)
 
