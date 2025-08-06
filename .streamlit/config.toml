@@ -1,10 +1,15 @@
+[[theme.fontFaces]]
+family = "Lato"
+url = "https://fonts.gstatic.com/s/lato/v24/S6uyw4BMUTPHjx4wXiWtFCc.woff2"
+
 [theme]
-# Bertram Labs brand colors
-primaryColor = "#2D5DA8"           # Bertram Labs blue for buttons and accents
-backgroundColor = "#FFFFFF"        # Clean white background
-secondaryBackgroundColor = "#F8F9FA"  # Light gray for sidebar and containers
-textColor = "#1F1A4F"             # Bertram Labs dark navy for text
-font = "sans serif"               # Clean, professional font
+base = "light"
+primaryColor = "#224AA8"
+backgroundColor = "#FFFFFF"
+secondaryBackgroundColor = "#F8F9FA"
+textColor = "#1C2334"
+borderColor = "#224AA8"
+font = "Lato"
 
 [server]
 # Optional: disable file watcher for better performance
