@@ -108,17 +108,17 @@ def main():
         model = st.selectbox(
             "OpenAI Model",
             options=[
-                "gpt-4o",            # Default (recommended)
-                "chatgpt-4o-latest", # Latest updates and improvements
-                "gpt-4o-mini",       # Cost-effective multimodal
-                "gpt-4.1",           # Latest flagship coding-optimized
-                "gpt-4.1-mini",      # Cost-effective GPT-4.1
-                "o4-mini",           # Best reasoning for most situations
-                "o3",                # Most powerful reasoning
-                "o3-mini"            # Cost-effective reasoning
+                "gpt-5",             # GPT-5 main reasoning model
+                "gpt-5-mini",        # GPT-5 efficient version
+                "gpt-5-nano",        # GPT-5 smallest version
+                "gpt-4o",            # GPT-4o flagship model
+                "gpt-4o-mini",       # GPT-4o cost-effective
+                "chatgpt-4o-latest", # Latest GPT-4o updates
+                "gpt-4.1",           # GPT-4.1 flagship
+                "gpt-4.1-mini",      # GPT-4.1 cost-effective
             ],
             index=0,
-            help="Select which OpenAI model to use for all agents. gpt-4o is recommended for blog generation."
+            help="All models support WebSearchTool for style analysis and research. gpt-5 is recommended for best performance."
         )
         
         # Reference blog input
