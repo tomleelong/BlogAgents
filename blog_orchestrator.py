@@ -22,12 +22,12 @@ class BlogAgentOrchestrator:
                 name="Blog Style Analyzer",
                 model=self.model,
                 instructions="""You are a writing style analyzer that can analyze any blog or publication.
-                
+
                 Your tasks:
                 1. Use web search to fetch recent articles from the specified blog/publication: {blog_source}
-                2. Analyze their writing style, tone, and voice patterns
+                2. Analyze their writing style, tone, voice patterns, and formatting structure
                 3. Extract key stylistic elements including:
-                   - Headlines: structure, length, power words
+                   - Headlines: structure, length, power words, formatting (H1, H2, H3)
                    - Opening paragraphs: hook techniques, information density
                    - Voice: tone characteristics and personality
                    - Technical language: complexity level and jargon usage
@@ -35,8 +35,21 @@ class BlogAgentOrchestrator:
                    - Common phrases, vocabulary, and expressions
                    - Paragraph organization and flow
                    - Typical post length
+                   - FORMATTING PATTERNS: How they structure content with:
+                     * Heading hierarchy (H2, H3, H4 usage)
+                     * List formatting (bullet points, numbered lists)
+                     * Text emphasis (bold, italic usage patterns)
+                     * Paragraph lengths and breaks
+                     * Call-out boxes, quotes, or special formatting
+                     * Code blocks or technical formatting (if applicable)
                 4. Create actionable style guidelines for writers to replicate
-                
+
+                Include a specific FORMATTING GUIDE section with:
+                - Markdown formatting patterns they use
+                - Heading structure preferences
+                - List and emphasis usage patterns
+                - How they break up content visually
+
                 Focus on identifying measurable, replicable patterns.
                 Provide specific examples from the analyzed content.
                 """,
@@ -86,13 +99,61 @@ class BlogAgentOrchestrator:
             ),
             "writer": Agent(
                 name="Content Writer",
-                model=self.model, 
-                instructions="""You are a skilled blog writer.
-                - Create engaging, well-structured blog posts
+                model=self.model,
+                instructions="""You are a skilled blog writer who creates content in proper markdown format.
+
+                CRITICAL MARKDOWN FORMATTING REQUIREMENTS:
+                1. Use proper heading hierarchy:
+                   - Main title: # Title
+                   - Major sections: ## Section Title
+                   - Subsections: ### Subsection Title
+
+                2. Format lists correctly:
+                   - Bullet lists: - Item or * Item
+                   - Numbered lists: 1. Item, 2. Item
+                   - Sub-items: Use proper indentation with spaces
+
+                3. Use text emphasis:
+                   - Bold: **important text**
+                   - Italic: *emphasized text*
+
+                4. Structure content properly:
+                   - Blank lines between paragraphs
+                   - Blank lines before and after headings
+                   - Blank lines before and after lists
+
+                5. Follow the style guide's formatting patterns exactly
+
+                EXAMPLE PROPER MARKDOWN STRUCTURE:
+                # Main Title
+
+                Introduction paragraph with **key points** highlighted.
+
+                ## Major Section
+
+                Content paragraph explaining the section.
+
+                ### Subsection
+
+                - First bullet point
+                - Second bullet point with **emphasis**
+                - Third point
+
+                Another paragraph continuing the discussion.
+
+                ## Next Major Section
+
+                1. Numbered item one
+                2. Numbered item two
+                3. Numbered item three
+
+                Your tasks:
+                - Create engaging, well-structured blog posts using PROPER markdown formatting
                 - Use provided research effectively
                 - Write clear introductions and conclusions
-                - Include subheadings and bullet points
+                - Follow the specific formatting patterns from the style guide
                 - Maintain conversational but professional tone
+                - ALWAYS use proper markdown syntax as shown in the example above
                 """
             ),
             "internal_linker": Agent(
@@ -132,14 +193,49 @@ class BlogAgentOrchestrator:
             "editor": Agent(
                 name="Content Editor",
                 model=self.model,
-                instructions="""You are a content editor.
-                - Review content for clarity and flow
-                - Fix grammar and style issues
-                - Ensure consistent tone throughout
-                - Improve readability and engagement
-                - Suggest structural improvements
-                - Consider SEO and AI visibility
-                - Preserve any internal links that have been added
+                instructions="""You are a content editor specializing in markdown-formatted content.
+
+                CRITICAL MARKDOWN EDITING REQUIREMENTS:
+                1. PRESERVE and IMPROVE markdown formatting:
+                   - Keep all heading hierarchy (# ## ###)
+                   - Maintain proper list formatting (- * 1.)
+                   - Preserve text emphasis (**bold**, *italic*)
+                   - Ensure blank lines between sections
+
+                2. FIX any broken markdown:
+                   - Add missing # symbols for headings
+                   - Fix inconsistent list formatting
+                   - Add proper line breaks and spacing
+                   - Ensure proper markdown structure
+
+                3. Content improvements:
+                   - Review content for clarity and flow
+                   - Fix grammar and style issues
+                   - Ensure consistent tone throughout
+                   - Improve readability and engagement
+                   - Suggest structural improvements
+                   - Consider SEO and AI visibility
+                   - Preserve any internal links that have been added
+
+                EXAMPLE OF PROPER MARKDOWN STRUCTURE TO MAINTAIN:
+                # Main Title
+
+                Introduction paragraph.
+
+                ## Major Section
+
+                Content with **important points** highlighted.
+
+                ### Subsection
+
+                - Bullet point one
+                - Bullet point two
+                - Bullet point three
+
+                More content here.
+
+                Your output must be properly formatted markdown that renders correctly in Streamlit.
+                If the input markdown is poorly formatted, FIX IT while preserving the content.
                 """
             ),
             "seo_analyzer": Agent(
@@ -286,20 +382,28 @@ class BlogAgentOrchestrator:
             print("✍️ Writing in matched style...")
             writing_prompt = f"""
             Write a blog post about: {topic}
-            
-            STYLE GUIDE TO FOLLOW:
+
+            STYLE GUIDE TO FOLLOW (including formatting patterns):
             {style_guide}
-            
+
             RESEARCH DATA:
             {research_result.final_output}
-            
+
             REQUIREMENTS: {requirements}
-            
+
             DUPLICATION STATUS: {duplication_status}
             Note: Based on the duplication analysis, ensure your content offers unique value and differentiation.
-            
-            Write the post to closely match the style and voice of {reference_blog}.
-            Use the specific patterns, tone, and techniques identified in the style guide.
+
+            CRITICAL FORMATTING INSTRUCTIONS:
+            1. Write the post to closely match the style and voice of {reference_blog}
+            2. Use the specific patterns, tone, and techniques identified in the style guide
+            3. Pay special attention to the FORMATTING GUIDE section - match their heading structure, list usage, and emphasis patterns
+            4. Output the content in proper markdown format that will render correctly
+            5. Use the same heading hierarchy (H2, H3, etc.) as shown in the style guide examples
+            6. Follow their bullet point vs. numbered list preferences
+            7. Apply bold/italic emphasis in the same way they do
+
+            The final output should be properly formatted markdown that matches both the writing style AND visual formatting of {reference_blog}.
             """
             
             writing_result = self._run_agent_safely(self.agents["writer"], writing_prompt)
