@@ -59,6 +59,11 @@ class SheetsManager:
             'Blog_Sources': [
                 'Domain', 'Category', 'Quality_Rating', 'Last_Analyzed',
                 'Success_Count', 'Notes'
+            ],
+            'Topic_Ideas': [
+                'ID', 'Source_Blog', 'Date_Created', 'Title', 'Angle',
+                'Keywords', 'Content_Type', 'Rationale', 'Search_Volume',
+                'Competition', 'Trend_Score', 'Status', 'Used_Date'
             ]
         }
 
@@ -250,6 +255,75 @@ class SheetsManager:
         except Exception as e:
             st.warning(f"Could not retrieve blog source stats: {str(e)}")
             return []
+
+    def save_topic_ideas(self, source_blog: str, topics: List[Dict]):
+        """Save generated topic ideas to sheets"""
+        try:
+            worksheet = self.spreadsheet.worksheet('Topic_Ideas')
+
+            for topic in topics:
+                # Generate ID
+                topic_id = datetime.now().strftime('%Y%m%d_%H%M%S_%f')[:20]
+
+                row_data = [
+                    topic_id,
+                    source_blog,
+                    datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
+                    topic.get('title', ''),
+                    topic.get('angle', ''),
+                    ', '.join(topic.get('keywords', [])),
+                    topic.get('content_type', ''),
+                    topic.get('rationale', ''),
+                    str(topic.get('search_volume', 'N/A')),
+                    topic.get('competition', 'N/A'),
+                    topic.get('trend_score', 0),
+                    'Generated',  # Status
+                    ''  # Used_Date - empty initially
+                ]
+
+                worksheet.append_row(row_data)
+
+        except Exception as e:
+            st.warning(f"Could not save topic ideas: {str(e)}")
+
+    def get_topic_ideas(self, source_blog: str = None, limit: int = 50) -> List[Dict]:
+        """Get saved topic ideas, optionally filtered by source blog"""
+        try:
+            worksheet = self.spreadsheet.worksheet('Topic_Ideas')
+            records = worksheet.get_all_records()
+
+            # Filter by source blog if specified
+            if source_blog:
+                records = [r for r in records if r.get('Source_Blog', '').lower() == source_blog.lower()]
+
+            # Sort by date (most recent first) and limit
+            sorted_records = sorted(
+                records,
+                key=lambda x: x.get('Date_Created', ''),
+                reverse=True
+            )
+
+            return sorted_records[:limit]
+
+        except Exception as e:
+            st.warning(f"Could not retrieve topic ideas: {str(e)}")
+            return []
+
+    def mark_topic_used(self, topic_id: str):
+        """Mark a topic idea as used"""
+        try:
+            worksheet = self.spreadsheet.worksheet('Topic_Ideas')
+            records = worksheet.get_all_records()
+
+            for i, record in enumerate(records):
+                if record.get('ID') == topic_id:
+                    row_num = i + 2  # +2 for header and 0-based index
+                    worksheet.update(f'L{row_num}', [['Used']])
+                    worksheet.update(f'M{row_num}', [[datetime.now().strftime('%Y-%m-%d')]])
+                    break
+
+        except Exception as e:
+            st.warning(f"Could not mark topic as used: {str(e)}")
 
 def create_sheets_manager(service_account_json: str, spreadsheet_id: str) -> Optional[SheetsManager]:
     """Factory function to create SheetsManager with error handling"""

@@ -18,6 +18,35 @@ class BlogAgentOrchestrator:
         
         # Specialist agents
         self.agents = {
+            "topic_generator": Agent(
+                name="Topic Idea Generator",
+                model=self.model,
+                instructions="""You are a topic idea generator for blog content.
+
+                Your tasks:
+                1. Analyze the reference blog/website to understand their content strategy
+                2. Identify content gaps and opportunities
+                3. Consider trending topics in their industry
+                4. Generate specific, actionable topic ideas that match their style
+
+                For each topic idea, provide:
+                - **Title**: Compelling headline in the blog's style
+                - **Angle**: Unique perspective or approach
+                - **Keywords**: 3-5 relevant keywords for SEO
+                - **Rationale**: Why this topic would work for their audience
+                - **Content Type**: (Guide, Tutorial, Listicle, Case Study, etc.)
+
+                Generate 8-10 diverse topic ideas that:
+                - Match the blog's content style and tone
+                - Fill gaps in their existing content
+                - Appeal to their target audience
+                - Have SEO potential
+                - Are specific and actionable
+
+                Format each idea clearly with all fields included.
+                """,
+                tools=[WebSearchTool()]
+            ),
             "style_analyzer": Agent(
                 name="Blog Style Analyzer",
                 model=self.model,
@@ -597,6 +626,123 @@ class BlogAgentOrchestrator:
     def create_style_matched_post(self, topic: str, reference_blog: str, requirements: str = "") -> Dict[str, str]:
         """Legacy function name - calls create_blog_post internally."""
         return self.create_blog_post(topic, reference_blog, requirements)
+
+    def generate_topic_ideas(self, reference_blog: str, preferences: str = "", status_callback=None, trending_keywords: List[str] = None) -> List[Dict]:
+        """
+        Generate topic ideas for a blog based on their content strategy and trending keywords
+
+        Args:
+            reference_blog: URL of the blog to analyze
+            preferences: Optional user preferences (industry, audience, content type)
+            status_callback: Optional callback for progress updates
+            trending_keywords: Optional list of trending keywords to inform topic generation
+
+        Returns:
+            List of topic idea dicts
+        """
+        try:
+            if status_callback:
+                status_callback("💡 Analyzing blog and generating topic ideas...", 50)
+
+            print(f"💡 Generating topic ideas for {reference_blog}...")
+
+            # Build keyword context if provided
+            keyword_context = ""
+            if trending_keywords:
+                keyword_context = f"""
+
+                TRENDING KEYWORDS TO INCORPORATE:
+                These keywords are currently trending or have high search volume. Try to build topics around these:
+                {', '.join(trending_keywords[:10])}
+                """
+
+            prompt = f"""
+            Generate 5 topic ideas for the blog: {reference_blog}
+
+            Additional preferences:
+            {preferences if preferences else "No specific preferences"}
+            {keyword_context}
+
+            Instructions:
+            1. Quickly search {reference_blog} for 3-5 recent articles to understand their style
+            2. Generate 5 specific, actionable topic ideas that match their content style
+            3. Focus on topics they HAVEN'T covered yet
+            4. If trending keywords were provided, prioritize topics that incorporate those high-value keywords
+
+            For EACH topic, use this EXACT format:
+            ## 1. [Compelling Title Here]
+            - **Angle**: [One sentence unique perspective]
+            - **Keywords**: [keyword1, keyword2, keyword3]
+            - **Rationale**: [One sentence why this works]
+            - **Content Type**: [Guide/Tutorial/Listicle/Case Study]
+
+            Generate all 5 topics now. Be concise but specific.
+            """
+
+            result = self._run_agent_safely(self.agents["topic_generator"], prompt, timeout_seconds=600)  # 10 minutes
+
+            if status_callback:
+                status_callback("✅ Topic ideas generated!", 100)
+
+            # Parse the result into structured topics
+            topics = self._parse_topic_ideas(result.final_output)
+
+            return topics
+
+        except Exception as e:
+            print(f"❌ Error generating topics: {e}")
+            if status_callback:
+                status_callback(f"❌ Error: {str(e)}", 0)
+            return []
+
+    def _parse_topic_ideas(self, raw_output: str) -> List[Dict]:
+        """Parse the agent's topic ideas output into structured format"""
+        import re
+
+        topics = []
+        lines = raw_output.split('\n')
+
+        current_topic = None
+
+        for line in lines:
+            line = line.strip()
+
+            # Match topic title (e.g., "## 1. Title Here" or "1. Title Here")
+            title_match = re.match(r'^#{0,2}\s*\d+\.\s*(.+)$', line)
+            if title_match:
+                # Save previous topic
+                if current_topic and current_topic.get('title'):
+                    topics.append(current_topic)
+
+                # Start new topic
+                current_topic = {
+                    'title': title_match.group(1).strip(),
+                    'angle': '',
+                    'keywords': [],
+                    'rationale': '',
+                    'content_type': ''
+                }
+                continue
+
+            if not current_topic:
+                continue
+
+            # Extract fields
+            if line.startswith('- **Angle**:') or line.startswith('**Angle**:'):
+                current_topic['angle'] = line.split(':', 1)[1].strip()
+            elif line.startswith('- **Keywords**:') or line.startswith('**Keywords**:'):
+                keywords_str = line.split(':', 1)[1].strip()
+                current_topic['keywords'] = [kw.strip() for kw in keywords_str.split(',')]
+            elif line.startswith('- **Rationale**:') or line.startswith('**Rationale**:'):
+                current_topic['rationale'] = line.split(':', 1)[1].strip()
+            elif line.startswith('- **Content Type**:') or line.startswith('**Content Type**:'):
+                current_topic['content_type'] = line.split(':', 1)[1].strip()
+
+        # Don't forget last topic
+        if current_topic and current_topic.get('title'):
+            topics.append(current_topic)
+
+        return topics
 
 def main():
     """CLI entry point - runs example blog post generation."""

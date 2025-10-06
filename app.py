@@ -7,6 +7,7 @@ import json
 from urllib.parse import urlparse
 from blog_orchestrator import BlogAgentOrchestrator
 from sheets_manager import create_sheets_manager
+from keyword_research import create_keyword_researcher
 
 @contextlib.contextmanager
 def temporary_env_var(key, value):
@@ -165,7 +166,71 @@ def main():
                 st.warning("⚠️ Please provide Service Account JSON and Spreadsheet ID")
 
         st.markdown("---")
-        
+
+        # Google Ads API for Keyword Research
+        st.subheader("🔍 Keyword Research (Optional)")
+        use_keyword_research = st.checkbox(
+            "Enable Google Ads API",
+            value=False,
+            help="Get search volume and competition data for topics"
+        )
+
+        keyword_researcher = None
+        if use_keyword_research:
+            with st.expander("⚙️ Google Ads API Configuration"):
+                st.markdown("**Required: 3 Simple Inputs**")
+
+                # Developer Token
+                developer_token = st.text_input(
+                    "Developer Token",
+                    type="password",
+                    help="Get from: Google Ads → Tools → API Center"
+                )
+
+                # Service Account JSON
+                service_account_json = st.text_area(
+                    "Service Account JSON",
+                    height=150,
+                    help="Paste your service account JSON file contents",
+                    placeholder='{\n  "type": "service_account",\n  "project_id": "...",\n  ...\n}'
+                )
+
+                # Customer ID
+                customer_id = st.text_input(
+                    "Customer ID",
+                    help="Your Google Ads customer ID (without hyphens, e.g., 1234567890)",
+                    placeholder="1234567890"
+                )
+
+                if all([developer_token, service_account_json, customer_id]):
+                    if st.button("🔗 Test Google Ads Connection"):
+                        try:
+                            config = {
+                                'developer_token': developer_token,
+                                'service_account_json': service_account_json,
+                                'customer_id': customer_id
+                            }
+                            keyword_researcher = create_keyword_researcher(config)
+                            if keyword_researcher and keyword_researcher.google_ads_client:
+                                st.success("✅ Connected to Google Ads API!")
+                                st.session_state.keyword_researcher = keyword_researcher
+                            else:
+                                st.error("❌ Failed to connect - check credentials")
+                        except Exception as e:
+                            st.error(f"❌ Connection failed: {str(e)}")
+
+                    # Use cached connection
+                    if 'keyword_researcher' in st.session_state:
+                        keyword_researcher = st.session_state.keyword_researcher
+                        st.info("🔍 Using cached Google Ads connection")
+                else:
+                    st.info("💡 [Setup Guide](https://developers.google.com/google-ads/api/docs/first-call/overview)")
+        else:
+            # Always create researcher for Google Trends (free)
+            keyword_researcher = create_keyword_researcher()
+
+        st.markdown("---")
+
         # Model selection
         model = st.selectbox(
             "OpenAI Model",
@@ -205,18 +270,147 @@ def main():
     
     # Main content area
     col1, col2 = st.columns([1, 1])
-    
+
     with col1:
         st.header("📝 Content Settings")
-        
-        # Topic input
+
+        # Topic Generator Section
+        st.subheader("💡 Topic Idea Generator")
+
+        # Optional target keywords input
+        target_keywords = st.text_input(
+            "🎯 Target Keywords (Optional)",
+            placeholder="e.g., AI automation, machine learning, productivity",
+            help="Enter keywords you want to rank for, separated by commas. These will be prioritized in topic generation."
+        )
+
+        if st.button("🎯 Generate Topic Ideas", help="AI-powered topic suggestions based on reference blog"):
+            if not reference_blog.strip():
+                st.error("⚠️ Please enter a reference blog URL first")
+            elif not api_key:
+                st.error("⚠️ Please enter your OpenAI API key first")
+            else:
+                with st.spinner("Generating topic ideas..."):
+                    with temporary_env_var("OPENAI_API_KEY", api_key):
+                        orchestrator = BlogAgentOrchestrator(model=model)
+
+                        # Generate topics
+                        progress_bar = st.progress(0)
+                        status_text = st.empty()
+
+                        def update_status(message, progress):
+                            status_text.text(message)
+                            progress_bar.progress(progress)
+
+                        # Combine user keywords with trending keywords
+                        all_keywords = []
+
+                        # Add user-provided target keywords (highest priority)
+                        if target_keywords.strip():
+                            user_keywords = [kw.strip() for kw in target_keywords.split(',') if kw.strip()]
+                            all_keywords.extend(user_keywords)
+
+                        # Fetch trending keywords to supplement user keywords
+                        if keyword_researcher:
+                            try:
+                                status_text.text("🔍 Fetching trending keywords...")
+                                # Extract a seed keyword from the reference blog domain
+                                import re
+                                domain_match = re.search(r'https?://(?:www\.)?([^/]+)', reference_blog)
+                                if domain_match:
+                                    domain = domain_match.group(1).split('.')[0]
+                                    trending_keywords = keyword_researcher.get_related_queries(domain)
+                                    # Add trending keywords (avoid duplicates)
+                                    for kw in trending_keywords:
+                                        if kw.lower() not in [k.lower() for k in all_keywords]:
+                                            all_keywords.append(kw)
+                            except Exception as e:
+                                st.warning(f"⚠️ Could not fetch trending keywords: {str(e)}")
+
+                        # Generate topics informed by all keywords
+                        topics = orchestrator.generate_topic_ideas(
+                            reference_blog,
+                            preferences="",
+                            status_callback=update_status,
+                            trending_keywords=all_keywords if all_keywords else None
+                        )
+
+                        # Enrich with detailed keyword data
+                        if keyword_researcher and topics:
+                            status_text.text("🔍 Enriching with keyword research data...")
+                            topics = keyword_researcher.enrich_topics_with_keyword_data(topics)
+
+                        # Store in session state
+                        st.session_state.generated_topics = topics
+                        status_text.empty()
+                        progress_bar.empty()
+
+                        # Save to Google Sheets if enabled
+                        if sheets_manager and topics:
+                            try:
+                                status_text.text("💾 Saving topics to Google Sheets...")
+                                sheets_manager.save_topic_ideas(reference_blog, topics)
+                                st.success("✅ Topics saved to Google Sheets!")
+                            except Exception as e:
+                                st.warning(f"⚠️ Could not save topics to Sheets: {str(e)}")
+
+
+        # Display generated topics
+        if 'generated_topics' in st.session_state and st.session_state.generated_topics:
+            st.success(f"✅ Generated {len(st.session_state.generated_topics)} topic ideas!")
+
+            for i, topic_idea in enumerate(st.session_state.generated_topics):
+                with st.expander(f"💡 {topic_idea['title']}", expanded=False):
+                    st.write(f"**Angle:** {topic_idea.get('angle', 'N/A')}")
+                    st.write(f"**Keywords:** {', '.join(topic_idea.get('keywords', []))}")
+                    st.write(f"**Content Type:** {topic_idea.get('content_type', 'N/A')}")
+                    st.write(f"**Rationale:** {topic_idea.get('rationale', 'N/A')}")
+
+                    # Show keyword data if available
+                    if 'search_volume' in topic_idea:
+                        col_a, col_b, col_c = st.columns(3)
+                        with col_a:
+                            st.metric("Search Volume", topic_idea.get('search_volume', 'N/A'))
+                        with col_b:
+                            st.metric("Competition", topic_idea.get('competition', 'N/A'))
+                        with col_c:
+                            st.metric("Trend", topic_idea.get('trend_status', 'N/A'))
+
+                    if st.button(f"✏️ Use This Topic", key=f"use_topic_{i}"):
+                        st.session_state.selected_topic = topic_idea['title']
+
+                        # Mark topic as used in Google Sheets if enabled
+                        if sheets_manager and 'ID' in topic_idea:
+                            try:
+                                sheets_manager.mark_topic_used(topic_idea['ID'])
+                                st.success(f"✅ Topic marked as used in Google Sheets!")
+                            except Exception as e:
+                                st.warning(f"⚠️ Could not mark topic as used: {str(e)}")
+
+                        st.rerun()
+
+        st.markdown("---")
+
+        # Topic input (auto-filled if topic selected)
+        default_topic = st.session_state.get('selected_topic', '')
         topic = st.text_area(
             "Blog Topic",
+            value=default_topic,
             height=100,
             max_chars=MAX_TOPIC_LENGTH,
             placeholder=f"Enter your blog topic (max {MAX_TOPIC_LENGTH} characters)",
-            help="The main subject for your blog post"
+            help="The main subject for your blog post",
+            key="topic_input"
         )
+
+        # Clear selected topic after it's been loaded into the field
+        if 'selected_topic' in st.session_state and default_topic:
+            # Show success message
+            st.success(f"✅ Topic loaded: {default_topic[:50]}...")
+            # Clear the flag so it doesn't keep showing
+            if st.button("🗑️ Clear Topic"):
+                st.session_state.selected_topic = ''
+                st.rerun()
         
         # Requirements input
         requirements = st.text_area(
