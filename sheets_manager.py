@@ -257,13 +257,16 @@ class SheetsManager:
             return []
 
     def save_topic_ideas(self, source_blog: str, topics: List[Dict]):
-        """Save generated topic ideas to sheets"""
+        """Save generated topic ideas to sheets and add IDs to topic objects"""
         try:
             worksheet = self.spreadsheet.worksheet('Topic_Ideas')
 
             for topic in topics:
                 # Generate ID
                 topic_id = datetime.now().strftime('%Y%m%d_%H%M%S_%f')[:20]
+
+                # Add ID to the topic object for later reference
+                topic['ID'] = topic_id
 
                 row_data = [
                     topic_id,
