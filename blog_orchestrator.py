@@ -371,48 +371,20 @@ class BlogAgentOrchestrator:
 
             results["style_guide"] = style_guide
             
-            # Step 2: Check for content duplication
-            if status_callback:
-                status_callback("🔍 Checking for duplicate content...", 30)
-            print("🔍 Checking for existing content on this topic...")
-            duplication_prompt = f"""
-            Check for existing content on {reference_blog} about the topic: {topic}
-            
-            Search for articles that cover similar subjects and assess duplication risk.
-            Provide specific recommendations for differentiation if duplicates are found.
-            
-            Topic to check: {topic}
-            Website to search: {reference_blog}
-            """
-            
-            duplication_result = self._run_agent_safely(self.agents["content_checker"], duplication_prompt)
-            results["duplication_check"] = duplication_result.final_output
-            
-            # Parse duplication status for warnings
-            duplication_status = "CLEAR"
-            if "HIGH_RISK" in duplication_result.final_output:
-                duplication_status = "HIGH_RISK"
-            elif "WARNING" in duplication_result.final_output:
-                duplication_status = "WARNING"
-            results["duplication_status"] = duplication_status
-            
-            # Step 3: Research topic
+            # Step 2: Research topic (duplication check moved to topic generation phase)
             if status_callback:
                 status_callback("🔍 Researching topic...", 45)
             print("🔍 Researching topic...")
             research_prompt = f"""
             Research the topic: {topic}
-            
+
             Requirements: {requirements}
-            
-            DUPLICATION ANALYSIS:
-            {duplication_result.final_output}
-            
-            Based on the duplication analysis above, focus your research on:
-            - New angles or perspectives not covered in existing content
+
+            Focus your research on:
             - Recent developments or trends in this area
-            - Unique insights that add value beyond what already exists
-            - Facts, statistics, and examples that differentiate this post
+            - Facts, statistics, and examples
+            - Unique insights and perspectives
+            - Practical, actionable information
             """
             research_result = self._run_agent_safely(self.agents["researcher"], research_prompt)
             results["research"] = research_result.final_output
@@ -431,9 +403,6 @@ class BlogAgentOrchestrator:
             {research_result.final_output}
 
             REQUIREMENTS: {requirements}
-
-            DUPLICATION STATUS: {duplication_status}
-            Note: Based on the duplication analysis, ensure your content offers unique value and differentiation.
 
             CRITICAL FORMATTING INSTRUCTIONS:
             1. Write the post to closely match the style and voice of {reference_blog}
@@ -632,7 +601,7 @@ class BlogAgentOrchestrator:
         """Legacy function name - calls create_blog_post internally."""
         return self.create_blog_post(topic, reference_blog, requirements)
 
-    def generate_topic_ideas(self, reference_blog: str, preferences: str = "", status_callback=None, trending_keywords: List[str] = None, product_target: str = None) -> List[Dict]:
+    def generate_topic_ideas(self, reference_blog: str, preferences: str = "", status_callback=None, trending_keywords: List[str] = None, product_target: str = None, existing_topics: List[str] = None) -> List[Dict]:
         """
         Generate topic ideas for a blog based on their content strategy and trending keywords
 
@@ -642,6 +611,7 @@ class BlogAgentOrchestrator:
             status_callback: Optional callback for progress updates
             trending_keywords: Optional list of trending keywords to inform topic generation
             product_target: Optional product/service information to promote naturally
+            existing_topics: Optional list of existing blog post titles to avoid duplication
 
         Returns:
             List of topic idea dicts
@@ -673,6 +643,20 @@ class BlogAgentOrchestrator:
                 IMPORTANT: Create topics that naturally lead to this product as a solution. The content should provide value first, then subtly position the product as helpful. Avoid being overly promotional.
                 """
 
+            # Build existing topics context if provided
+            duplication_context = ""
+            if existing_topics and len(existing_topics) > 0:
+                # Show first 50 topics to avoid token limit
+                topics_sample = existing_topics[:50]
+                duplication_context = f"""
+
+                EXISTING BLOG POSTS TO AVOID DUPLICATING:
+                {chr(10).join(f"- {title}" for title in topics_sample)}
+                {f"(and {len(existing_topics) - 50} more...)" if len(existing_topics) > 50 else ""}
+
+                CRITICAL: Do NOT suggest topics that are too similar to these existing posts. Generate completely new angles and subjects.
+                """
+
             prompt = f"""
             Generate 5 topic ideas for the blog: {reference_blog}
 
@@ -680,11 +664,12 @@ class BlogAgentOrchestrator:
             {preferences if preferences else "No specific preferences"}
             {keyword_context}
             {product_context}
+            {duplication_context}
 
             Instructions:
             1. Quickly search {reference_blog} for 3-5 recent articles to understand their style
             2. Generate 5 specific, actionable topic ideas that match their content style
-            3. Focus on topics they HAVEN'T covered yet
+            3. Focus on topics they HAVEN'T covered yet - avoid duplicating the existing topics list above
             4. If trending keywords were provided, prioritize topics that incorporate those high-value keywords
             5. If a product target was provided, create topics that naturally allow mentioning/promoting the product while providing genuine value
 
@@ -762,6 +747,55 @@ class BlogAgentOrchestrator:
             topics.append(current_topic)
 
         return topics
+
+    def extract_blog_topics(self, blog_url: str) -> List[str]:
+        """
+        Extract all blog post titles from the reference blog
+
+        Args:
+            blog_url: URL of the blog (can be RSS feed or blog homepage)
+
+        Returns:
+            List of blog post titles
+        """
+        try:
+            print(f"📰 Extracting topics from {blog_url}...")
+
+            prompt = f"""
+            Extract all available blog post titles from: {blog_url}
+
+            Instructions:
+            1. Fetch the content from this URL
+            2. Extract all blog post titles you can find
+            3. Return ONLY the titles as a simple list, one per line
+            4. No numbering, no formatting, just the title text
+
+            Return format:
+            Title 1
+            Title 2
+            Title 3
+            """
+
+            result = self._run_agent_safely(
+                self.agents["research"],  # Use research agent with WebSearchTool
+                prompt,
+                timeout_seconds=120
+            )
+
+            # Parse titles from output (one per line)
+            titles = []
+            for line in result.final_output.split('\n'):
+                line = line.strip()
+                # Skip empty lines and common header lines
+                if line and len(line) > 10:  # Ignore very short lines
+                    titles.append(line)
+
+            print(f"✅ Extracted {len(titles)} topics from {blog_url}")
+            return titles
+
+        except Exception as e:
+            print(f"❌ Error extracting topics: {e}")
+            return []
 
 def main():
     """CLI entry point - runs example blog post generation."""

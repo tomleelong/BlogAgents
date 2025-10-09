@@ -58,7 +58,7 @@ class SheetsManager:
             ],
             'Blog_Sources': [
                 'Domain', 'Category', 'Quality_Rating', 'Last_Analyzed',
-                'Success_Count', 'Notes'
+                'Success_Count', 'Notes', 'Topics_JSON', 'Topics_Last_Updated'
             ],
             'Topic_Ideas': [
                 'ID', 'Source_Blog', 'Date_Created', 'Title', 'Angle',
@@ -79,6 +79,21 @@ class SheetsManager:
                 )
                 # Add headers
                 worksheet.append_row(headers)
+            else:
+                # Update existing sheet to add missing columns
+                worksheet = self.spreadsheet.worksheet(sheet_name)
+                existing_headers = worksheet.row_values(1)
+
+                # Check if we need to expand the sheet
+                if len(headers) > worksheet.col_count:
+                    worksheet.resize(rows=worksheet.row_count, cols=len(headers))
+
+                # Check if any headers are missing
+                for i, header in enumerate(headers):
+                    if i >= len(existing_headers) or existing_headers[i] != header:
+                        # Add missing column header
+                        col_letter = chr(65 + i)  # A=65, B=66, etc.
+                        worksheet.update(f'{col_letter}1', [[header]])
 
     def test_connection(self) -> bool:
         """Test if connection to Google Sheets is working"""
@@ -327,6 +342,90 @@ class SheetsManager:
 
         except Exception as e:
             st.warning(f"Could not mark topic as used: {str(e)}")
+
+    def get_cached_blog_topics(self, blog_url: str) -> Optional[Dict]:
+        """
+        Get cached blog topics from Blog_Sources sheet
+
+        Args:
+            blog_url: URL of the blog
+
+        Returns:
+            Dict with 'topics' (list) and 'last_updated' (datetime), or None if not found
+        """
+        try:
+            worksheet = self.spreadsheet.worksheet('Blog_Sources')
+            records = worksheet.get_all_records()
+
+            for record in records:
+                if record.get('Domain', '').lower() == blog_url.lower():
+                    topics_json = record.get('Topics_JSON', '')
+                    last_updated = record.get('Topics_Last_Updated', '')
+
+                    if topics_json:
+                        import json
+                        topics = json.loads(topics_json)
+                        return {
+                            'topics': topics,
+                            'last_updated': last_updated
+                        }
+            return None
+
+        except Exception as e:
+            print(f"Could not get cached topics: {str(e)}")
+            return None
+
+    def save_blog_topics(self, blog_url: str, topics: List[str]):
+        """
+        Save or update blog topics in Blog_Sources sheet
+
+        Args:
+            blog_url: URL of the blog
+            topics: List of blog post titles
+        """
+        try:
+            import json
+            print(f"📝 Attempting to save {len(topics)} topics for {blog_url}")
+            worksheet = self.spreadsheet.worksheet('Blog_Sources')
+            records = worksheet.get_all_records()
+            print(f"📊 Found {len(records)} existing records in Blog_Sources")
+
+            # Check if blog exists
+            row_num = None
+            for i, record in enumerate(records):
+                if record.get('Domain', '').lower() == blog_url.lower():
+                    row_num = i + 2  # +2 for header and 0-based index
+                    print(f"🔄 Updating existing row {row_num}")
+                    break
+
+            topics_json = json.dumps(topics)
+            timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+
+            if row_num:
+                # Update existing row
+                print(f"📝 Writing to G{row_num} and H{row_num}")
+                worksheet.update(f'G{row_num}', [[topics_json]])  # Topics_JSON column
+                worksheet.update(f'H{row_num}', [[timestamp]])     # Topics_Last_Updated column
+            else:
+                # Add new row
+                print(f"➕ Adding new row for {blog_url}")
+                worksheet.append_row([
+                    blog_url,      # Domain
+                    '',            # Category
+                    '',            # Quality_Rating
+                    '',            # Last_Analyzed
+                    0,             # Success_Count
+                    '',            # Notes
+                    topics_json,   # Topics_JSON
+                    timestamp      # Topics_Last_Updated
+                ])
+
+            print(f"✅ Successfully saved {len(topics)} topics for {blog_url}")
+
+        except Exception as e:
+            print(f"❌ Error saving blog topics: {str(e)}")
+            import traceback
+            print(traceback.format_exc())
 
 def create_sheets_manager(service_account_json: str, spreadsheet_id: str) -> Optional[SheetsManager]:
     """Factory function to create SheetsManager with error handling"""

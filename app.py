@@ -310,6 +310,42 @@ def main():
                             status_text.text(message)
                             progress_bar.progress(progress)
 
+                        # Get or extract existing blog topics for duplication checking
+                        existing_topics = []
+                        if sheets_manager:
+                            try:
+                                status_text.text("📚 Checking for cached blog topics...")
+                                cached = sheets_manager.get_cached_blog_topics(reference_blog)
+
+                                if cached:
+                                    # Check if cache is fresh (< 7 days)
+                                    from datetime import datetime, timedelta
+                                    try:
+                                        last_updated = datetime.strptime(cached['last_updated'], '%Y-%m-%d %H:%M:%S')
+                                        if datetime.now() - last_updated < timedelta(days=7):
+                                            existing_topics = cached['topics']
+                                            st.info(f"📚 Using cached topics ({len(existing_topics)} titles)")
+                                        else:
+                                            # Cache is stale, extract fresh topics
+                                            status_text.text("📰 Extracting fresh blog topics...")
+                                            existing_topics = orchestrator.extract_blog_topics(reference_blog)
+                                            if existing_topics:
+                                                sheets_manager.save_blog_topics(reference_blog, existing_topics)
+                                    except:
+                                        # Invalid timestamp, extract fresh
+                                        status_text.text("📰 Extracting blog topics...")
+                                        existing_topics = orchestrator.extract_blog_topics(reference_blog)
+                                        if existing_topics:
+                                            sheets_manager.save_blog_topics(reference_blog, existing_topics)
+                                else:
+                                    # No cache, extract for first time
+                                    status_text.text("📰 Extracting blog topics...")
+                                    existing_topics = orchestrator.extract_blog_topics(reference_blog)
+                                    if existing_topics:
+                                        sheets_manager.save_blog_topics(reference_blog, existing_topics)
+                            except Exception as e:
+                                st.warning(f"⚠️ Could not extract blog topics: {str(e)}")
+
                         # Combine user keywords with trending keywords
                         all_keywords = []
 
@@ -335,13 +371,14 @@ def main():
                             except Exception as e:
                                 st.warning(f"⚠️ Could not fetch trending keywords: {str(e)}")
 
-                        # Generate topics informed by all keywords and product target
+                        # Generate topics informed by all keywords, product target, and existing topics
                         topics = orchestrator.generate_topic_ideas(
                             reference_blog,
                             preferences="",
                             status_callback=update_status,
                             trending_keywords=all_keywords if all_keywords else None,
-                            product_target=product_target.strip() if product_target.strip() else None
+                            product_target=product_target.strip() if product_target.strip() else None,
+                            existing_topics=existing_topics if existing_topics else None
                         )
 
                         # Enrich with detailed keyword data
@@ -545,19 +582,10 @@ def main():
                 if "error" in results:
                     st.error(f"❌ Error: {results['error']}")
                 else:
-                    # Show duplication warning if needed
-                    if "duplication_status" in results:
-                        if results["duplication_status"] == "HIGH_RISK":
-                            st.error("🚨 **HIGH RISK**: Similar content already exists on this blog!")
-                        elif results["duplication_status"] == "WARNING":
-                            st.warning("⚠️ **WARNING**: Some similar content found on this blog.")
-                        else:
-                            st.success("✅ **CLEAR**: No duplicate content detected.")
                     # Tabs for different outputs
-                    tab1, tab2, tab3, tab4, tab5, tab6, tab7, tab8 = st.tabs([
+                    tab1, tab2, tab3, tab4, tab5, tab6, tab7 = st.tabs([
                         "📄 Final Post",
-                        "🎨 Style Guide", 
-                        "🚨 Duplication Check",
+                        "🎨 Style Guide",
                         "🔍 Research & Analysis", 
                         "✍️ Writer Draft",
                         "📊 Initial SEO Analysis",
@@ -654,31 +682,6 @@ def main():
                         )
                     
                     with tab3:
-                        st.markdown("### Content Duplication Check")
-                        st.markdown("*Analysis of existing content and duplication risk*")
-                        if "duplication_check" in results:
-                            st.text_area(
-                                "Duplication Check Results",
-                                value=results["duplication_check"],
-                                height=400,
-                                disabled=False,
-                                key="duplication_area",
-                                help="Content duplication analysis and recommendations"
-                            )
-                            
-                            # Show duplication status badge
-                            if "duplication_status" in results:
-                                status = results["duplication_status"]
-                                if status == "HIGH_RISK":
-                                    st.error(f"🚨 **Status**: {status}")
-                                elif status == "WARNING":
-                                    st.warning(f"⚠️ **Status**: {status}")
-                                else:
-                                    st.success(f"✅ **Status**: {status}")
-                        else:
-                            st.info("Duplication check not available")
-                    
-                    with tab4:
                         st.markdown("### Research & Analysis")
                         st.markdown("*Comprehensive research on the topic*")
                         if "research" in results:
@@ -693,7 +696,7 @@ def main():
                         else:
                             st.info("Research results not available")
                     
-                    with tab5:
+                    with tab4:
                         st.markdown("### Writer Draft")
                         st.markdown("*Initial blog post draft before SEO optimization*")
                         if "draft" in results:
@@ -736,7 +739,7 @@ def main():
                         else:
                             st.info("Writer draft not available")
                     
-                    with tab6:
+                    with tab5:
                         st.markdown("### Initial SEO Analysis")
                         st.markdown("*SEO optimization recommendations for the draft*")
                         if "initial_seo_analysis" in results:
@@ -751,7 +754,7 @@ def main():
                         else:
                             st.info("Initial SEO analysis not available")
                     
-                    with tab7:
+                    with tab6:
                         st.markdown("### Content With Internal Links")
                         st.markdown("*Blog post with strategic SEO-optimized internal links*")
                         if "with_links" in results:
@@ -794,7 +797,7 @@ def main():
                         else:
                             st.info("Internal linking results not available")
                     
-                    with tab8:
+                    with tab7:
                         st.markdown("### Final SEO Performance Analysis")
                         st.markdown("*Comprehensive SEO assessment of the completed blog post*")
                         
