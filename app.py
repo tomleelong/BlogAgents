@@ -426,6 +426,13 @@ def main():
                         # Set the topic_input widget directly
                         st.session_state.topic_input = topic_idea['title']
 
+                        # Pre-fill requirements with topic context
+                        requirements_text = f"""Angle: {topic_idea.get('angle', 'N/A')}
+Target Keywords: {', '.join(topic_idea.get('keywords', []))}
+Content Type: {topic_idea.get('content_type', 'N/A')}
+Rationale: {topic_idea.get('rationale', 'N/A')}"""
+                        st.session_state.requirements_input = requirements_text
+
                         # Mark topic as used in Google Sheets if enabled
                         if sheets_manager and 'ID' in topic_idea:
                             try:
@@ -460,7 +467,8 @@ def main():
 - Focus on [specific aspect]
 
 (max {MAX_REQUIREMENTS_LENGTH} characters)""",
-            help="Specific requirements for your blog post"
+            help="Specific requirements for your blog post",
+            key="requirements_input"
         )
 
         # Product/Page target for blog generation
