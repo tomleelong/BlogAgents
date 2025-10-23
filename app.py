@@ -255,7 +255,15 @@ def main():
             placeholder="e.g., YourBlog.com or https://yourblog.com/feed/",
             help="Blog URL or RSS feed to analyze for style matching"
         )
-        
+
+        # Specific reference pages input
+        reference_pages = st.text_area(
+            "📌 Specific Reference Pages (Optional)",
+            placeholder="Enter specific blog post URLs to analyze (one per line):\nhttps://example.com/post-1\nhttps://example.com/post-2",
+            height=100,
+            help="Add specific high-performing posts you want to emulate. These will be analyzed in addition to the main blog."
+        )
+
         if not api_key:
             st.warning("⚠️ Please enter your OpenAI API key to continue")
             st.stop()
@@ -527,6 +535,12 @@ Rationale: {topic_idea.get('rationale', 'N/A')}"""
                         status_text.text(message)
                         progress_bar.progress(progress)
 
+                    # Parse specific reference pages
+                    specific_pages_list = None
+                    if reference_pages.strip():
+                        # Split by newlines and filter empty lines
+                        specific_pages_list = [page.strip() for page in reference_pages.split('\n') if page.strip()]
+
                     # Check for cached style guide if sheets enabled
                     cached_style = None
                     if sheets_manager:
@@ -546,7 +560,8 @@ Rationale: {topic_idea.get('rationale', 'N/A')}"""
                         requirements=requirements,
                         status_callback=update_status,
                         cached_style_guide=cached_style['style_guide'] if cached_style else None,
-                        product_target=blog_product_target.strip() if blog_product_target.strip() else None
+                        product_target=blog_product_target.strip() if blog_product_target.strip() else None,
+                        specific_pages=specific_pages_list
                     )
 
                     # Save results to sheets if enabled

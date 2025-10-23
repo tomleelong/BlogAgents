@@ -347,7 +347,7 @@ class BlogAgentOrchestrator:
         if hasattr(self, '_thread_pool'):
             self._thread_pool.shutdown(wait=True)
 
-    def create_blog_post(self, topic: str, reference_blog: str, requirements: str = "", status_callback=None, cached_style_guide: str = None, product_target: str = None) -> Dict[str, str]:
+    def create_blog_post(self, topic: str, reference_blog: str, requirements: str = "", status_callback=None, cached_style_guide: str = None, product_target: str = None, specific_pages: List[str] = None) -> Dict[str, str]:
         """Main workflow: orchestrates all 7 agents to create style-matched blog post."""
         results = {}
 
@@ -367,7 +367,7 @@ class BlogAgentOrchestrator:
                 if status_callback:
                     status_callback("🎨 Analyzing blog style...", 10)
                 print(f"🎨 Analyzing {reference_blog} style...")
-                style_guide = self.analyze_blog_style(reference_blog, status_callback)
+                style_guide = self.analyze_blog_style(reference_blog, status_callback, specific_pages)
 
             results["style_guide"] = style_guide
             
@@ -569,21 +569,34 @@ class BlogAgentOrchestrator:
         print("✅ Parallel research completed")
         return results
     
-    def analyze_blog_style(self, blog_source: str, status_callback=None) -> str:
+    def analyze_blog_style(self, blog_source: str, status_callback=None, specific_pages: List[str] = None) -> str:
         """Uses style_analyzer agent to extract writing patterns from reference blog."""
         if status_callback:
             status_callback(f"🎨 Fetching articles from {blog_source}...", 15)
         print(f"🎨 Analyzing writing style of {blog_source}...")
-        
+
+        # Build specific pages context
+        specific_pages_context = ""
+        if specific_pages and len(specific_pages) > 0:
+            specific_pages_context = f"""
+
+            PRIORITY: Analyze these specific high-performing posts first:
+            {chr(10).join(f"- {page}" for page in specific_pages)}
+
+            These pages should be the PRIMARY examples in your style guide.
+            """
+
         style_prompt = f"""
         Analyze the writing style of {blog_source}.
-        
+        {specific_pages_context}
+
         Instructions:
         1. Search for recent articles from {blog_source}
-        2. Analyze multiple articles to identify consistent patterns
-        3. Extract the publication's distinctive voice and style characteristics
-        4. Create a detailed style guide that includes specific examples
-        
+        2. If specific pages were provided above, analyze those FIRST and prioritize their patterns
+        3. Analyze multiple articles to identify consistent patterns
+        4. Extract the publication's distinctive voice and style characteristics
+        5. Create a detailed style guide that includes specific examples
+
         Focus on recent articles to capture current writing style.
         """
         
