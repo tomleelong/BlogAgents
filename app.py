@@ -423,7 +423,8 @@ def main():
                             st.metric("Trend", topic_idea.get('trend_status', 'N/A'))
 
                     if st.button(f"✏️ Use This Topic", key=f"use_topic_{i}"):
-                        st.session_state.selected_topic = topic_idea['title']
+                        # Set the topic_input widget directly
+                        st.session_state.topic_input = topic_idea['title']
 
                         # Mark topic as used in Google Sheets if enabled
                         if sheets_manager and 'ID' in topic_idea:
@@ -437,26 +438,15 @@ def main():
 
         st.markdown("---")
 
-        # Topic input (auto-filled if topic selected)
-        default_topic = st.session_state.get('selected_topic', '')
+        # Topic input
         topic = st.text_area(
             "Blog Topic",
-            value=default_topic,
             height=100,
             max_chars=MAX_TOPIC_LENGTH,
             placeholder=f"Enter your blog topic (max {MAX_TOPIC_LENGTH} characters)",
             help="The main subject for your blog post",
             key="topic_input"
         )
-
-        # Clear selected topic after it's been loaded into the field
-        if 'selected_topic' in st.session_state and default_topic:
-            # Show success message
-            st.success(f"✅ Topic loaded: {default_topic[:50]}...")
-            # Clear the flag so it doesn't keep showing
-            if st.button("🗑️ Clear Topic"):
-                st.session_state.selected_topic = ''
-                st.rerun()
         
         # Requirements input
         requirements = st.text_area(

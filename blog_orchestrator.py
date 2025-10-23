@@ -674,11 +674,11 @@ class BlogAgentOrchestrator:
             5. If a product target was provided, create topics that naturally allow mentioning/promoting the product while providing genuine value
 
             For EACH topic, use this EXACT format:
-            ## 1. [Compelling Title Here]
-            - **Angle**: [One sentence unique perspective]
-            - **Keywords**: [keyword1, keyword2, keyword3]
-            - **Rationale**: [One sentence why this works]
-            - **Content Type**: [Guide/Tutorial/Listicle/Case Study]
+            ## 1. Compelling Title Here
+            - **Angle**: One sentence unique perspective
+            - **Keywords**: keyword1, keyword2, keyword3
+            - **Rationale**: One sentence why this works
+            - **Content Type**: Guide/Tutorial/Listicle/Case Study
 
             Generate all 5 topics now. Be concise but specific.
             """
