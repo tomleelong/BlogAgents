@@ -386,7 +386,7 @@ class BlogAgentOrchestrator:
             - Unique insights and perspectives
             - Practical, actionable information
             """
-            research_result = self._run_agent_safely(self.agents["researcher"], research_prompt)
+            research_result = self._run_agent_safely(self.agents["researcher"], research_prompt, timeout_seconds=600)
             results["research"] = research_result.final_output
             
             # Step 4: Write in matching style
@@ -416,7 +416,7 @@ class BlogAgentOrchestrator:
             The final output should be properly formatted markdown that matches both the writing style AND visual formatting of {reference_blog}.
             """
             
-            writing_result = self._run_agent_safely(self.agents["writer"], writing_prompt)
+            writing_result = self._run_agent_safely(self.agents["writer"], writing_prompt, timeout_seconds=600)
             results["draft"] = writing_result.final_output
             
             # Step 5: SEO Analysis of draft for optimization recommendations  
@@ -443,7 +443,7 @@ class BlogAgentOrchestrator:
             """
             
             try:
-                initial_seo_result = self._run_agent_safely(self.agents["seo_analyzer"], initial_seo_prompt)
+                initial_seo_result = self._run_agent_safely(self.agents["seo_analyzer"], initial_seo_prompt, timeout_seconds=600)
                 results["initial_seo_analysis"] = initial_seo_result.final_output
                 print(f"✅ Initial SEO analysis completed: {len(results['initial_seo_analysis'])} characters")
             except Exception as e:
@@ -481,7 +481,7 @@ class BlogAgentOrchestrator:
             Return the blog post with ONLY verified internal links added.
             """
             
-            linking_result = self._run_agent_safely(self.agents["internal_linker"], linking_prompt)
+            linking_result = self._run_agent_safely(self.agents["internal_linker"], linking_prompt, timeout_seconds=600)
             results["with_links"] = linking_result.final_output
             
             # Step 7: Edit with SEO optimization while preserving style and links
@@ -510,7 +510,7 @@ class BlogAgentOrchestrator:
             - Balance SEO optimization with authentic brand voice
             """
             
-            editing_result = self._run_agent_safely(self.agents["editor"], editing_prompt)
+            editing_result = self._run_agent_safely(self.agents["editor"], editing_prompt, timeout_seconds=600)
             results["final"] = editing_result.final_output
             
             # Step 8: Final SEO Analysis and Performance Assessment
@@ -536,7 +536,7 @@ class BlogAgentOrchestrator:
             4. Content quality and search visibility assessment
             """
             
-            final_seo_result = self._run_agent_safely(self.agents["seo_analyzer"], final_seo_prompt)
+            final_seo_result = self._run_agent_safely(self.agents["seo_analyzer"], final_seo_prompt, timeout_seconds=600)
             results["seo_analysis"] = final_seo_result.final_output
             
             if status_callback:
@@ -603,7 +603,7 @@ class BlogAgentOrchestrator:
         try:
             if status_callback:
                 status_callback("🔍 Analyzing writing patterns...", 25)
-            result = self._run_agent_safely(self.agents["style_analyzer"], style_prompt)
+            result = self._run_agent_safely(self.agents["style_analyzer"], style_prompt, timeout_seconds=600)
             print("✅ Style analysis completed")
             return result.final_output
         except Exception as e:
