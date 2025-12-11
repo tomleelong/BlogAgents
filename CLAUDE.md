@@ -22,7 +22,7 @@ cp .env.example .env
 
 ### Web App (Streamlit)
 ```bash
-# Run the web interface
+# Run the main web interface
 streamlit run app.py
 
 # Opens browser at http://localhost:8501
@@ -36,6 +36,20 @@ streamlit run app.py
 # - Real-time progress tracking
 # - Tabbed output (Final Post, Style Guide, Research, SEO Analysis)
 # - Download functionality (Markdown, HTML, Word, JSON)
+```
+
+### JSON Workflow App (Streamlit)
+```bash
+# Run the JSON-based workflow interface for OpenAI AgentBuilder
+streamlit run app_v2_json.py
+
+# Opens browser at http://localhost:8501
+# Features:
+# - Submit JSON configuration to OpenAI AgentBuilder workflow
+# - JSON validation before submission
+# - Sample JSON template loading
+# - Raw API response viewing
+# - Markdown download of generated content
 ```
 
 ### Command Line
@@ -106,6 +120,7 @@ Each step produces intermediate results stored in a results dictionary, allowing
 - `OPENAI_API_KEY`: Required for OpenAI Agents SDK
 
 ### Optional
+- `WORKFLOW_ID`: OpenAI AgentBuilder workflow ID (for app_v2_json.py)
 - `OPENAI_ORG_ID`: Optional organization ID for billing
 - `GOOGLE_ADS_DEVELOPER_TOKEN`: For Google Ads API keyword data
 - `GOOGLE_ADS_CLIENT_ID`: OAuth2 client ID for Google Ads

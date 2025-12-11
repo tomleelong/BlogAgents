@@ -68,3 +68,8 @@ credentials.json
 # All JSON files (except package files which are tracked)
 *.json
 /.venv
+
+# Next.js
+.next/
+out/
+node_modules/
