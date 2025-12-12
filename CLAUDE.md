@@ -52,19 +52,20 @@ streamlit run app_v2_json.py
 # - Markdown download of generated content
 ```
 
-### Topic Idea Generator App (Streamlit)
+### Blog Agent App (Streamlit)
 ```bash
-# Run the standalone topic idea generator
+# Run the blog agent app (topic ideas + blog generation)
 streamlit run app_v2.py
 
 # Opens browser at http://localhost:8501
 # Features:
 # - Generate blog topic ideas using TopicIdeaAgent
-# - Reference blog URL analysis
+# - Reference blog URL and high-performing pages analysis
 # - Target keywords for SEO optimization
-# - Product/service promotion context
+# - Product/service URL targeting
 # - Existing topics avoidance
-# - Export to JSON or Markdown
+# - Additional requirements for blog content
+# - Select topics and generate blog content
 ```
 
 ### Command Line

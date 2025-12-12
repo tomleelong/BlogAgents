@@ -4,7 +4,6 @@ Streamlit app for Topic Idea Generation using TopicIdeaAgent.
 """
 import streamlit as st
 import os
-import json
 import logging
 import time
 from dotenv import load_dotenv
@@ -15,6 +14,7 @@ load_dotenv()
 class Config:
     """App configuration."""
     OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
+    OPENAI_MODEL = os.getenv("OPENAI_MODEL", "gpt-4o")
     LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO")
 
 
@@ -90,12 +90,12 @@ def generate_topics(
 def main():
     """Streamlit app entry point."""
     st.set_page_config(
-        page_title="Topic Idea Generator",
+        page_title="Blog Agent",
         layout="wide"
     )
 
-    st.title("Topic Idea Generator")
-    st.markdown("Generate blog topic ideas using AI-powered analysis")
+    st.title("Blog Agent")
+    st.markdown("Generate topic ideas, select the ones you like, then generate blog content")
 
     # Sidebar for configuration
     with st.sidebar:
@@ -109,30 +109,6 @@ def main():
             help="Your OpenAI API key"
         )
 
-        # Model selection
-        model = st.selectbox(
-            "Model",
-            options=[
-                "gpt-4o",
-                "gpt-4o-mini",
-                "gpt-4.1",
-                "gpt-4.1-mini",
-            ],
-            index=0,
-            help="OpenAI model to use for topic generation"
-        )
-
-        st.markdown("---")
-
-        # Clear results button
-        if st.button("Clear Results"):
-            if 'generated_topics' in st.session_state:
-                del st.session_state.generated_topics
-            st.rerun()
-
-    # Main content - single column layout
-    st.header("Input Parameters")
-
     # Reference blog URL (required)
     reference_blog = st.text_input(
         "Reference Blog URL (required)",
@@ -140,10 +116,23 @@ def main():
         help="The blog to analyze for style and content strategy"
     )
 
+    # High performing pages (optional)
+    high_performing_pages_input = st.text_area(
+        "High Performing Pages (optional)",
+        placeholder="e.g. https://blog.example.com/best-article\nhttps://blog.example.com/top-post",
+        height=100,
+        help="URLs of high-performing blog posts to analyze for style patterns"
+    )
+
+    # Parse high performing pages into list
+    high_performing_pages = []
+    if high_performing_pages_input.strip():
+        high_performing_pages = [p.strip() for p in high_performing_pages_input.split('\n') if p.strip()]
+
     # Target keywords (optional)
     keywords_input = st.text_area(
         "Target Keywords (optional)",
-        placeholder="Enter keywords separated by commas:\nsafety knives, utility knives, box cutter safety",
+        placeholder="e.g: safety knives, utility knives, box cutter safety",
         height=100,
         help="Keywords to incorporate into topic ideas for SEO"
     )
@@ -155,8 +144,8 @@ def main():
 
     # Product target (optional)
     product_target = st.text_area(
-        "Product/Service Target (optional)",
-        placeholder="Enter product URL or description:\nhttps://example.com/products/my-product\nOr describe the product/service to promote...",
+        "Target Product/Service URLs (optional)",
+        placeholder="e.g. https://example.com/products/my-product\nhttps://example.com/products/some-other-product",
         height=100,
         help="Product or service to naturally promote in topic ideas"
     )
@@ -173,6 +162,14 @@ def main():
     existing_topics = []
     if existing_topics_input.strip():
         existing_topics = [t.strip() for t in existing_topics_input.split('\n') if t.strip()]
+
+    # Additional requirements (optional)
+    additional_requirements = st.text_area(
+        "Additional Requirements (optional)",
+        placeholder="Content must be at least 2000 words and has a call to action",
+        height=100,
+        help="Additional requirements for blog content generation"
+    )
 
     # Number of topics
     num_topics_input = st.text_input(
@@ -197,7 +194,7 @@ def main():
         st.session_state.run_generation = True
 
     st.markdown("---")
-    st.header("Output")
+    st.header("Topic Ideas")
 
     # Run generation if triggered
     if st.session_state.get('run_generation'):
@@ -210,7 +207,7 @@ def main():
         start_time = time.time()
         result = generate_topics(
             api_key=api_key,
-            model=model,
+            model=Config.OPENAI_MODEL,
             reference_blog=reference_blog,
             target_keywords=target_keywords,
             product_target=product_target,
@@ -237,59 +234,86 @@ def main():
     if 'generated_topics' in st.session_state and st.session_state.generated_topics:
         topics = st.session_state.generated_topics
 
-        for i, topic in enumerate(topics):
-            with st.expander(f"{i + 1}. {topic.get('title', 'Untitled')}", expanded=(i == 0)):
-                col1, col2 = st.columns([2, 1])
+        # Initialize selected topics in session state if not exists
+        if 'selected_topics' not in st.session_state:
+            st.session_state.selected_topics = {}
 
-                with col1:
+        for i, topic in enumerate(topics):
+            topic_key = f"topic_{i}"
+            col_check, col_expander = st.columns([0.05, 0.95])
+
+            with col_check:
+                is_selected = st.checkbox(
+                    "",
+                    key=topic_key,
+                    value=st.session_state.selected_topics.get(topic_key, False),
+                    label_visibility="collapsed"
+                )
+                st.session_state.selected_topics[topic_key] = is_selected
+
+            with col_expander:
+                with st.expander(f"{i + 1}. {topic.get('title', 'Untitled')}", expanded=(i == 0)):
                     st.markdown(f"**Angle:** {topic.get('angle', 'N/A')}")
                     st.markdown(f"**Rationale:** {topic.get('rationale', 'N/A')}")
-
-                with col2:
                     st.markdown(f"**Content Type:** {topic.get('content_type', 'N/A')}")
                     keywords = topic.get('keywords', [])
                     if keywords:
                         st.markdown(f"**Keywords:** {', '.join(keywords)}")
 
-        # Export options
+        # Get selected topics count
+        selected_indices = [i for i in range(len(topics)) if st.session_state.selected_topics.get(f"topic_{i}", False)]
+        selected_count = len(selected_indices)
+
+        # Generate Blog(s) button
         st.markdown("---")
-        st.subheader("Export")
+        button_label = f"Generate Blog(s) ({selected_count} selected)" if selected_count > 0 else "Generate Blog(s)"
+        generate_blogs_disabled = selected_count == 0
+        if st.button(button_label, type="primary", disabled=generate_blogs_disabled):
+            st.session_state.run_blog_generation = True
+            st.session_state.selected_topics_for_blogs = [topics[i] for i in selected_indices]
 
-        # Convert to JSON for download
-        topics_json = json.dumps(topics, indent=2)
+        # Display generated JSON for testing
+        if st.session_state.get('run_blog_generation'):
+            st.session_state.run_blog_generation = False
 
-        col1, col2 = st.columns(2)
-        with col1:
-            st.download_button(
-                label="Download as JSON",
-                data=topics_json,
-                file_name="topic_ideas.json",
-                mime="application/json"
-            )
+            st.markdown("---")
+            st.subheader("Generated JSON (for testing)")
 
-        with col2:
-            # Convert to markdown
-            md_content = "# Generated Topic Ideas\n\n"
-            for i, topic in enumerate(topics):
-                md_content += f"## {i + 1}. {topic.get('title', 'Untitled')}\n\n"
-                md_content += f"- **Angle:** {topic.get('angle', 'N/A')}\n"
-                md_content += f"- **Keywords:** {', '.join(topic.get('keywords', []))}\n"
-                md_content += f"- **Rationale:** {topic.get('rationale', 'N/A')}\n"
-                md_content += f"- **Content Type:** {topic.get('content_type', 'N/A')}\n\n"
+            selected_topics_list = st.session_state.get('selected_topics_for_blogs', [])
 
-            st.download_button(
-                label="Download as Markdown",
-                data=md_content,
-                file_name="topic_ideas.md",
-                mime="text/markdown"
-            )
+            for i, topic in enumerate(selected_topics_list):
+                # Build writing_requirements from topic attributes
+                writing_requirements_parts = []
+                if topic.get('angle'):
+                    writing_requirements_parts.append(f"Angle: {topic.get('angle')}")
+                if topic.get('rationale'):
+                    writing_requirements_parts.append(f"Rationale: {topic.get('rationale')}")
+                if topic.get('content_type'):
+                    writing_requirements_parts.append(f"Content Type: {topic.get('content_type')}")
+                if topic.get('keywords'):
+                    writing_requirements_parts.append(f"Keywords: {', '.join(topic.get('keywords', []))}")
+                if additional_requirements.strip():
+                    writing_requirements_parts.append(f"Additional Requirements: {additional_requirements.strip()}")
+                writing_requirements = '\n'.join(writing_requirements_parts)
+
+                # Build JSON object
+                topic_json = {
+                    "high_performing_pages": high_performing_pages if high_performing_pages else ["N/A"],
+                    "root_blog_url": reference_blog,
+                    "target_product_urls": [p.strip() for p in product_target.split('\n') if p.strip()] if product_target.strip() else ["N/A"],
+                    "topics": [topic.get('title', 'Untitled')],
+                    "writing_requirements": writing_requirements
+                }
+
+                with st.expander(f"Topic {i + 1}: {topic.get('title', 'Untitled')}", expanded=True):
+                    st.json(topic_json)
 
     # Footer
     st.markdown("---")
     st.markdown(
         """
         <div style='text-align: center; color: gray; padding: 1rem 0;'>
-        <p>Powered by TopicIdeaAgent</p>
+        <p>Powered by Bertram Labs</p>
         </div>
         """,
         unsafe_allow_html=True
