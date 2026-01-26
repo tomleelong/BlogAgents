@@ -1,18 +1,30 @@
 #!/usr/bin/env python3
 import asyncio
 import threading
-from typing import Dict, List
+from typing import Dict, List, Optional, TYPE_CHECKING
 from concurrent.futures import ThreadPoolExecutor, TimeoutError as FutureTimeoutError
 from dotenv import load_dotenv
 from agents import Agent, Runner, WebSearchTool
 
+if TYPE_CHECKING:
+    from brand_config import BrandConfig
+
 load_dotenv()
 
+
 class BlogAgentOrchestrator:
-    def __init__(self, model="gpt-5"):
+    def __init__(self, model: str = "gpt-5", brand_config: Optional["BrandConfig"] = None):
+        """
+        Initialize the blog orchestrator.
+
+        Args:
+            model: OpenAI model to use for all agents
+            brand_config: Optional brand configuration for brand-aware generation
+        """
         # Store the model for all agents
         self.model = model
-        
+        self.brand_config = brand_config
+
         # Thread pool for agent execution (prevents resource leaks)
         self._thread_pool = ThreadPoolExecutor(max_workers=4, thread_name_prefix="agent-")
         
@@ -347,27 +359,66 @@ class BlogAgentOrchestrator:
         if hasattr(self, '_thread_pool'):
             self._thread_pool.shutdown(wait=True)
 
-    def create_blog_post(self, topic: str, reference_blog: str, requirements: str = "", status_callback=None, cached_style_guide: str = None, product_target: str = None, specific_pages: List[str] = None) -> Dict[str, str]:
+    def _build_brand_context(self) -> str:
+        """Build brand context string for agent prompts."""
+        if not self.brand_config:
+            return ""
+
+        return f"""
+BRAND CONTEXT:
+- Brand: {self.brand_config.display_name}
+- Domain: {self.brand_config.primary_domain}
+- Tagline: {self.brand_config.company_tagline}
+- Key Value Propositions: {', '.join(self.brand_config.value_propositions)}
+- Brand Tone: {', '.join(self.brand_config.tone_keywords)}
+- Primary Keywords: {', '.join(self.brand_config.primary_keywords)}
+- Industry Terms: {', '.join(self.brand_config.industry_terms)}
+- Terms to Avoid: {', '.join(self.brand_config.avoid_terms)}
+"""
+
+    def _get_effective_reference_blog(self, reference_blog: str = None) -> str:
+        """Get the effective reference blog URL, using brand config if available."""
+        if reference_blog:
+            return reference_blog
+        if self.brand_config:
+            return self.brand_config.blog_url or self.brand_config.style_source_url or ""
+        return ""
+
+    def _get_internal_link_targets(self) -> List[str]:
+        """Get priority internal link targets for current brand."""
+        if self.brand_config:
+            return self.brand_config.internal_link_targets
+        return []
+
+    def create_blog_post(self, topic: str, reference_blog: str = None, requirements: str = "", status_callback=None, cached_style_guide: str = None, product_target: str = None, specific_pages: List[str] = None) -> Dict[str, str]:
         """Main workflow: orchestrates all 7 agents to create style-matched blog post."""
         results = {}
+
+        # Use effective reference blog (from param or brand config)
+        effective_reference_blog = self._get_effective_reference_blog(reference_blog)
+        if not effective_reference_blog:
+            return {"error": "No reference blog specified and no brand configuration available"}
 
         # Add product target to requirements if provided
         if product_target:
             product_instruction = f"\n\nIMPORTANT - PRODUCT/PAGE TO PROMOTE:\n{product_target}\n\nNaturally incorporate mentions of this product/page where relevant. Provide value first, then subtly position the product as a helpful solution. Include a link if a URL was provided."
             requirements = requirements + product_instruction if requirements else product_instruction
 
+        # Build brand context for prompts
+        brand_context = self._build_brand_context()
+
         try:
             # Step 1: Analyze reference style (or use cached)
             if cached_style_guide:
                 if status_callback:
                     status_callback("📋 Using cached style guide...", 15)
-                print(f"📋 Using cached style guide for {reference_blog}")
+                print(f"📋 Using cached style guide for {effective_reference_blog}")
                 style_guide = cached_style_guide
             else:
                 if status_callback:
                     status_callback("🎨 Analyzing blog style...", 10)
-                print(f"🎨 Analyzing {reference_blog} style...")
-                style_guide = self.analyze_blog_style(reference_blog, status_callback, specific_pages)
+                print(f"🎨 Analyzing {effective_reference_blog} style...")
+                style_guide = self.analyze_blog_style(effective_reference_blog, status_callback, specific_pages)
 
             results["style_guide"] = style_guide
             
@@ -395,7 +446,7 @@ class BlogAgentOrchestrator:
             print("✍️ Writing in matched style...")
             writing_prompt = f"""
             Write a blog post about: {topic}
-
+            {brand_context}
             STYLE GUIDE TO FOLLOW (including formatting patterns):
             {style_guide}
 
@@ -405,15 +456,16 @@ class BlogAgentOrchestrator:
             REQUIREMENTS: {requirements}
 
             CRITICAL FORMATTING INSTRUCTIONS:
-            1. Write the post to closely match the style and voice of {reference_blog}
+            1. Write the post to closely match the style and voice of {effective_reference_blog}
             2. Use the specific patterns, tone, and techniques identified in the style guide
             3. Pay special attention to the FORMATTING GUIDE section - match their heading structure, list usage, and emphasis patterns
             4. Output the content in proper markdown format that will render correctly
             5. Use the same heading hierarchy (H2, H3, etc.) as shown in the style guide examples
             6. Follow their bullet point vs. numbered list preferences
             7. Apply bold/italic emphasis in the same way they do
+            8. If brand context is provided, naturally incorporate brand voice and keywords
 
-            The final output should be properly formatted markdown that matches both the writing style AND visual formatting of {reference_blog}.
+            The final output should be properly formatted markdown that matches both the writing style AND visual formatting of {effective_reference_blog}.
             """
             
             writing_result = self._run_agent_safely(self.agents["writer"], writing_prompt, timeout_seconds=600)
@@ -454,23 +506,31 @@ class BlogAgentOrchestrator:
             if status_callback:
                 status_callback("🔗 Adding strategic internal links...", 75)
             print("🔗 Adding internal links with SEO optimization...")
+
+            # Get internal link targets from brand config if available
+            link_targets = self._get_internal_link_targets()
+            link_targets_hint = ""
+            if link_targets:
+                link_targets_hint = f"\n\nPRIORITY PAGES TO LINK TO (if relevant):\n" + "\n".join(f"- {url}" for url in link_targets)
+
             linking_prompt = f"""
             Add strategic internal links to this blog post:
 
             BLOG POST CONTENT:
             {writing_result.final_output}
 
-            WEBSITE/DOMAIN: {reference_blog}
+            WEBSITE/DOMAIN: {effective_reference_blog}
+            {link_targets_hint}
 
             SEO RECOMMENDATIONS TO CONSIDER:
             {results.get("initial_seo_analysis", "No SEO recommendations available")}
 
             CRITICAL Instructions:
-            1. Use WebSearchTool to search for existing content on {reference_blog} that relates to topics in this post
-            2. Use search queries like: "site:{reference_blog} [topic]" to find specific pages
+            1. Use WebSearchTool to search for existing content on {effective_reference_blog} that relates to topics in this post
+            2. Use search queries like: "site:{effective_reference_blog} [topic]" to find specific pages
             3. ONLY use URLs that you find in actual search results - never guess or construct URLs
             4. For each link you want to add:
-               - Search for the specific topic using site:{reference_blog} operator
+               - Search for the specific topic using site:{effective_reference_blog} operator
                - Copy the EXACT URL from the search result
                - Use that exact URL in your markdown link
             5. Add 2-5 relevant internal links using natural anchor text (if found)
@@ -489,17 +549,17 @@ class BlogAgentOrchestrator:
                 status_callback("📝 Final editing with SEO optimization...", 85)
             print("📝 Final editing with SEO optimization...")
             editing_prompt = f"""
-            Edit this blog post while preserving the {reference_blog} style and internal links:
-            
+            Edit this blog post while preserving the {effective_reference_blog} style and internal links:
+            {brand_context}
             ORIGINAL STYLE GUIDE:
             {results["style_guide"]}
-            
+
             DRAFT TO EDIT:
             {linking_result.final_output}
-            
+
             SEO RECOMMENDATIONS TO IMPLEMENT:
             {results.get("initial_seo_analysis", "No SEO recommendations available")}
-            
+
             Instructions:
             - Improve grammar, flow, and clarity while maintaining the distinctive voice and style patterns
             - PRESERVE all internal links that have been added
@@ -508,6 +568,7 @@ class BlogAgentOrchestrator:
             - Ensure the content flows naturally around the linked text
             - Don't remove or modify any [anchor text](URL) formatting
             - Balance SEO optimization with authentic brand voice
+            - If brand context is provided, ensure the content aligns with brand tone and avoids prohibited terms
             """
             
             editing_result = self._run_agent_safely(self.agents["editor"], editing_prompt, timeout_seconds=600)
@@ -519,19 +580,19 @@ class BlogAgentOrchestrator:
             print("📊 Final SEO performance assessment...")
             final_seo_prompt = f"""
             Perform a final SEO analysis of this completed blog post:
-            
+
             FINAL BLOG POST:
             {editing_result.final_output}
-            
+
             ORIGINAL SEO RECOMMENDATIONS:
             {results.get("initial_seo_analysis", "No initial SEO recommendations were available")}
-            
+
             TARGET TOPIC: {topic}
-            PUBLICATION STYLE: {reference_blog}
-            
+            PUBLICATION STYLE: {effective_reference_blog}
+
             Provide a comprehensive final SEO assessment including:
             1. How well the original recommendations were implemented
-            2. Current SEO score and performance analysis  
+            2. Current SEO score and performance analysis
             3. Any remaining optimization opportunities
             4. Content quality and search visibility assessment
             """
@@ -569,8 +630,57 @@ class BlogAgentOrchestrator:
         print("✅ Parallel research completed")
         return results
     
-    def analyze_blog_style(self, blog_source: str, status_callback=None, specific_pages: List[str] = None) -> str:
-        """Uses style_analyzer agent to extract writing patterns from reference blog."""
+    def analyze_blog_style(self, blog_source: str = None, status_callback=None, specific_pages: List[str] = None) -> str:
+        """
+        Uses style_analyzer agent to extract writing patterns from reference blog.
+
+        For brands without their own blog, merges parent brand style with fallback style guide.
+        """
+        # Use effective blog source
+        effective_source = blog_source or self._get_effective_reference_blog()
+
+        # Check if brand has fallback style guide (for brands without blogs)
+        if self.brand_config and not self.brand_config.blog_url and self.brand_config.fallback_style_guide:
+            if status_callback:
+                status_callback(f"🎨 Using brand style guide with parent style...", 15)
+            print(f"🎨 Brand {self.brand_config.display_name} has no blog - using fallback style guide")
+
+            # If there's a style source (parent brand), analyze it and merge
+            if self.brand_config.style_source_url:
+                if status_callback:
+                    status_callback(f"🎨 Analyzing parent brand style from {self.brand_config.style_source_url}...", 20)
+
+                # Analyze parent brand style
+                parent_style = self._analyze_blog_style_internal(
+                    self.brand_config.style_source_url,
+                    status_callback,
+                    specific_pages
+                )
+
+                # Merge with brand-specific adjustments
+                merged_style = f"""
+{parent_style}
+
+---
+
+## BRAND-SPECIFIC STYLE ADJUSTMENTS FOR {self.brand_config.display_name.upper()}
+
+The following adjustments should be applied to the base style above:
+
+{self.brand_config.fallback_style_guide}
+
+IMPORTANT: Apply these brand-specific adjustments while maintaining the core formatting patterns from the parent style.
+"""
+                return merged_style
+            else:
+                # No parent style source, use fallback directly
+                return self.brand_config.fallback_style_guide
+
+        # Standard style analysis
+        return self._analyze_blog_style_internal(effective_source, status_callback, specific_pages)
+
+    def _analyze_blog_style_internal(self, blog_source: str, status_callback=None, specific_pages: List[str] = None) -> str:
+        """Internal method for analyzing blog style via the style_analyzer agent."""
         if status_callback:
             status_callback(f"🎨 Fetching articles from {blog_source}...", 15)
         print(f"🎨 Analyzing writing style of {blog_source}...")
@@ -599,7 +709,7 @@ class BlogAgentOrchestrator:
 
         Focus on recent articles to capture current writing style.
         """
-        
+
         try:
             if status_callback:
                 status_callback("🔍 Analyzing writing patterns...", 25)

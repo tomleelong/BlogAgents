@@ -1,13 +1,26 @@
 #!/usr/bin/env python3
+"""
+Safety Products Global - Multi-Brand Blog Content Generator
+
+A specialized blog generation system for Safety Products Global's brand portfolio:
+- Slice (sliceproducts.com)
+- Klever Innovations (kleverinnovations.net)
+- Pacific Handy Cutter (phcsafety.com)
+"""
 import streamlit as st
 import os
 import re
 import contextlib
 import json
 from urllib.parse import urlparse
+from dotenv import load_dotenv
 from blog_orchestrator import BlogAgentOrchestrator
 from sheets_manager import create_sheets_manager
 from keyword_research import create_keyword_researcher
+from brand_config import get_brand_config, get_all_brands, get_effective_style_source, BrandConfig
+
+# Load environment variables
+load_dotenv()
 
 @contextlib.contextmanager
 def temporary_env_var(key, value):
@@ -124,42 +137,67 @@ MAX_API_KEY_LENGTH = 200
 def main():
     """Streamlit web app entry point - renders the blog generation interface."""
     st.set_page_config(
-        page_title="Blog Agents - AI Content Generator",
+        page_title="Safety Products Global - Blog Generator",
         page_icon="✍️",
         layout="wide"
     )
 
     # Initialize sheets_manager at function level
     sheets_manager = None
-    
-    # Header with logo (using file path for deployment)  
+
+    # Get API key from environment (simplified for dedicated system)
+    api_key = os.environ.get("OPENAI_API_KEY", "")
+
+    # Header with brand-aware styling
     _, col_center, _ = st.columns([1, 2, 1])
     with col_center:
-        try:
-            # Use relative path that works locally and when deployed
-            logo_path = os.path.join(os.path.dirname(__file__), "assets", "bertram_labs_logo.svg")
-            with open(logo_path, 'r') as f:
-                logo_svg = f.read()
-            # Add styling to the SVG
-            styled_logo = logo_svg.replace('<svg', '<svg style="max-width: 200px; height: auto;"')
-            st.markdown(f'<div style="text-align: center; padding: 1rem 0;">{styled_logo}</div>', unsafe_allow_html=True)
-        except:
-            # Fallback: show text logo if file not found
-            st.markdown('<div style="text-align: center; padding: 1rem 0;"><h2 style="color: #2D5DA8; margin: 0; font-family: Inter, sans-serif;">BERTRAM LABS</h2></div>', unsafe_allow_html=True)
-        st.markdown('<h1 style="text-align: center; margin-top: 1rem;">✍️ Blog Agents</h1>', unsafe_allow_html=True)
-        st.markdown('<p style="text-align: center; font-size: 1.1rem; margin-bottom: 2rem;"><strong>AI-powered blog content generation with style matching</strong></p>', unsafe_allow_html=True)
+        st.markdown('<h1 style="text-align: center; margin-top: 1rem;">✍️ Safety Products Global</h1>', unsafe_allow_html=True)
+        st.markdown('<p style="text-align: center; font-size: 1.1rem; margin-bottom: 2rem;"><strong>Multi-Brand Blog Content Generator</strong></p>', unsafe_allow_html=True)
     
     # Sidebar for configuration
     with st.sidebar:
+        # Brand Selection (TOP PRIORITY)
+        st.header("🏢 Brand Selection")
+        brands = get_all_brands()
+        selected_brand_name = st.selectbox(
+            "Select Brand",
+            options=[b.name for b in brands],
+            format_func=lambda x: get_brand_config(x).display_name,
+            help="Choose which brand you're creating content for"
+        )
+        brand_config = get_brand_config(selected_brand_name)
+
+        # Store brand in session state
+        st.session_state.current_brand = selected_brand_name
+
+        # Display brand info
+        st.markdown(f"**Domain:** {brand_config.primary_domain}")
+        if brand_config.blog_url:
+            st.markdown(f"**Blog:** [View Blog]({brand_config.blog_url})")
+        else:
+            st.info(f"No blog yet - using {brand_config.style_source_url} for style")
+
+        # Apply brand-specific color styling
+        st.markdown(f"""
+        <style>
+            .stApp {{ --primary-color: {brand_config.primary_color}; }}
+            div[data-testid="stSidebarHeader"] {{ border-bottom: 3px solid {brand_config.primary_color}; }}
+        </style>
+        """, unsafe_allow_html=True)
+
+        st.markdown("---")
         st.header("⚙️ Configuration")
 
-        # API Key input
-        api_key = st.text_input(
-            "OpenAI API Key",
-            type="password",
-            max_chars=MAX_API_KEY_LENGTH,
-            help="Your OpenAI API key for the Agents SDK"
-        )
+        # API Key - check environment first, allow override
+        if api_key:
+            st.success("✅ API Key loaded from environment")
+        else:
+            api_key = st.text_input(
+                "OpenAI API Key",
+                type="password",
+                max_chars=MAX_API_KEY_LENGTH,
+                help="Your OpenAI API key (or set OPENAI_API_KEY in .env)"
+            )
 
         # Model selection
         model = st.selectbox(
@@ -175,7 +213,7 @@ def main():
                 "gpt-4.1-mini",      # GPT-4.1 cost-effective
             ],
             index=0,
-            help="All models support WebSearchTool for style analysis and research. gpt-5 is recommended for best performance."
+            help="gpt-5 is recommended for best performance."
         )
 
         st.markdown("---")
@@ -301,26 +339,36 @@ def main():
 
         st.markdown("---")
 
-        # Reference blog input
-        reference_blog = st.text_input(
-            "Reference Blog/RSS Feed",
-            value="",
-            placeholder="e.g., YourBlog.com or https://yourblog.com/feed/",
-            help="Blog URL or RSS feed to analyze for style matching"
-        )
+        # Reference blog - auto-populated from brand config
+        st.subheader("📝 Style Source")
+        reference_blog = get_effective_style_source(brand_config)
+        st.info(f"Style source: {reference_blog}")
+
+        # Optional: allow override for advanced users
+        with st.expander("Advanced: Custom Reference"):
+            custom_ref = st.text_input(
+                "Override reference blog (optional)",
+                placeholder="Leave empty to use brand default"
+            )
+            if custom_ref:
+                try:
+                    reference_blog = validate_blog_url(custom_ref)
+                    st.success(f"Using custom reference: {reference_blog}")
+                except ValueError as e:
+                    st.error(f"Invalid URL: {e}")
 
         # Specific reference pages input
         reference_pages = st.text_area(
             "📌 Specific Reference Pages (Optional)",
-            placeholder="Enter specific blog post URLs to analyze (one per line):\nhttps://example.com/post-1\nhttps://example.com/post-2",
-            height=100,
-            help="Add specific high-performing posts you want to emulate. These will be analyzed in addition to the main blog."
+            placeholder="Enter specific blog post URLs to analyze (one per line):",
+            height=80,
+            help="Add specific high-performing posts you want to emulate."
         )
 
         if not api_key:
-            st.warning("⚠️ Please enter your OpenAI API key to continue")
+            st.warning("⚠️ Please set OPENAI_API_KEY in your .env file")
             st.stop()
-            
+
         # Validate reference blog URL
         if reference_blog:
             try:
@@ -333,35 +381,72 @@ def main():
     col1, col2 = st.columns([1, 1])
 
     with col1:
-        st.header("📝 Content Settings")
+        # Brand Dashboard (if sheets enabled)
+        if sheets_manager:
+            st.subheader(f"📊 {brand_config.display_name} Dashboard")
+            try:
+                stats = sheets_manager.get_brand_stats()
+                col_a, col_b, col_c, col_d = st.columns(4)
+                with col_a:
+                    st.metric("Total Posts", stats['total_posts'])
+                with col_b:
+                    st.metric("Avg SEO Score", f"{stats['avg_seo_score']}/100" if stats['avg_seo_score'] else "N/A")
+                with col_c:
+                    st.metric("Topics in Queue", stats['topics_generated'] - stats['topics_used'])
+                with col_d:
+                    st.metric("Last Generated", stats['last_generated'])
+            except Exception:
+                pass  # Skip dashboard if stats unavailable
+
+        st.header(f"📝 Content for {brand_config.display_name}")
 
         # Topic Generator Section
         st.subheader("💡 Topic Idea Generator")
 
-        # Optional target keywords input
+        # Pre-populated keywords from brand config
+        default_keywords = ", ".join(brand_config.primary_keywords[:5]) if brand_config.primary_keywords else ""
         target_keywords = st.text_input(
-            "🎯 Target Keywords (Optional)",
-            placeholder="e.g., AI automation, machine learning, productivity",
-            help="Enter keywords you want to rank for, separated by commas. These will be prioritized in topic generation."
+            "🎯 Target Keywords",
+            value=default_keywords,
+            help="Keywords to prioritize in topic generation. Pre-filled from brand config."
         )
 
-        # Optional product/page target
-        product_target = st.text_area(
-            "🛍️ Product/Page Target (Optional)",
-            placeholder="e.g., Page URL: https://mystore.com/products/product\nDescription: Brief description of what the page offers and its key benefits...",
-            height=100,
-            help="Enter a product page, landing page, or service page URL and/or description. Topics will be generated to naturally promote this page."
-        )
-
-        if st.button("🎯 Generate Topic Ideas", help="AI-powered topic suggestions based on reference blog"):
-            if not reference_blog.strip():
-                st.error("⚠️ Please enter a reference blog URL first")
-            elif not api_key:
-                st.error("⚠️ Please enter your OpenAI API key first")
+        # Product/page target - dropdown from brand's key products or custom input
+        st.markdown("**🛍️ Product/Page Target**")
+        if brand_config.key_products:
+            product_options = ["None - No specific product"] + [p.name for p in brand_config.key_products]
+            selected_product_idx = st.selectbox(
+                "Select a product to promote",
+                options=range(len(product_options)),
+                format_func=lambda i: product_options[i]
+            )
+            if selected_product_idx > 0:
+                selected_product = brand_config.key_products[selected_product_idx - 1]
+                product_target = f"Product: {selected_product.name}\nURL: {selected_product.url}\nDescription: {selected_product.description}"
+                st.info(f"Promoting: {selected_product.name}")
             else:
-                with st.spinner("Generating topic ideas..."):
+                product_target = st.text_area(
+                    "Custom product target (optional)",
+                    placeholder="Enter product URL and description...",
+                    height=80
+                )
+        else:
+            product_target = st.text_area(
+                "Product/Page Target (Optional)",
+                placeholder="e.g., Page URL: https://example.com/product\nDescription: Brief description...",
+                height=80,
+                help="Enter a product page to naturally promote in the content."
+            )
+
+        if st.button("🎯 Generate Topic Ideas", help=f"AI-powered topic suggestions for {brand_config.display_name}"):
+            if not reference_blog.strip():
+                st.error("⚠️ No reference blog configured")
+            elif not api_key:
+                st.error("⚠️ Please set OPENAI_API_KEY in your .env file")
+            else:
+                with st.spinner(f"Generating topic ideas for {brand_config.display_name}..."):
                     with temporary_env_var("OPENAI_API_KEY", api_key):
-                        orchestrator = BlogAgentOrchestrator(model=model)
+                        orchestrator = BlogAgentOrchestrator(model=model, brand_config=brand_config)
 
                         # Generate topics
                         progress_bar = st.progress(0)
@@ -581,8 +666,8 @@ Rationale: {topic_idea.get('rationale', 'N/A')}"""
             try:
                 # Use secure context manager for API key
                 with temporary_env_var("OPENAI_API_KEY", api_key):
-                    # Initialize orchestrator with selected model
-                    orchestrator = BlogAgentOrchestrator(model=model)
+                    # Initialize orchestrator with selected model and brand config
+                    orchestrator = BlogAgentOrchestrator(model=model, brand_config=brand_config)
 
                     # Progress tracking
                     progress_bar = st.progress(0)
@@ -950,10 +1035,11 @@ Rationale: {topic_idea.get('rationale', 'N/A')}"""
     # Footer
     st.markdown("---")
     st.markdown(
-        """
+        f"""
         <div style='text-align: center; color: gray; padding: 2rem 0;'>
-        <p>Powered by OpenAI Agents SDK | Built by <a href="https://www.bertramlabs.com" target="_blank" style="color: #2D5DA8; text-decoration: none; font-weight: bold;">Bertram Labs</a></p>
-        <p style='font-size: 0.9rem; margin-top: 0.5rem;'>Professional AI Solutions & Custom Development</p>
+        <p><strong>Safety Products Global</strong> - Multi-Brand Content Generation</p>
+        <p style='font-size: 0.9rem; margin-top: 0.5rem;'>Slice | Klever Innovations | Pacific Handy Cutter</p>
+        <p style='font-size: 0.8rem; margin-top: 0.5rem;'>Powered by OpenAI Agents SDK | Built by Bertram Labs</p>
         </div>
         """,
         unsafe_allow_html=True
