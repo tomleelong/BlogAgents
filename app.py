@@ -346,17 +346,13 @@ def main():
         model = st.selectbox(
             "OpenAI Model",
             options=[
+                "gpt-5.2",           # GPT-5.2 latest flagship model
                 "gpt-5",             # GPT-5 main reasoning model
                 "gpt-5-mini",        # GPT-5 efficient version
                 "gpt-5-nano",        # GPT-5 smallest version
-                "gpt-4o",            # GPT-4o flagship model
-                "gpt-4o-mini",       # GPT-4o cost-effective
-                "chatgpt-4o-latest", # Latest GPT-4o updates
-                "gpt-4.1",           # GPT-4.1 flagship
-                "gpt-4.1-mini",      # GPT-4.1 cost-effective
             ],
             index=0,
-            help="gpt-5 is recommended for best performance."
+            help="gpt-5.2 is the latest flagship model with best performance."
         )
 
         st.markdown("---")
@@ -543,6 +539,10 @@ def main():
     # ============================================================
     # AUTO-PILOT EXECUTION LOOP
     # ============================================================
+    # Ensure sheets_manager is retrieved from session state for auto-pilot
+    if 'sheets_manager' in st.session_state and sheets_manager is None:
+        sheets_manager = st.session_state.sheets_manager
+
     if st.session_state.autopilot_active:
         # Check for stop request
         if st.session_state.autopilot_stop_requested:
@@ -666,6 +666,9 @@ def main():
                         # Save to Google Sheets if enabled
                         if sheets_manager:
                             try:
+                                # Set the current brand context
+                                sheets_manager.set_current_brand(selected_brand_name)
+
                                 # Save style guide if this is the first post
                                 if post_num == 1 and 'style_guide' in results:
                                     sheets_manager.save_style_guide(reference_blog, results['style_guide'])
@@ -684,7 +687,9 @@ def main():
                                 if 'ID' in current_topic_dict:
                                     sheets_manager.mark_topic_used(current_topic_dict['ID'])
                             except Exception as e:
-                                print(f"Could not save to Sheets: {e}")
+                                st.warning(f"⚠️ Could not save to Sheets: {e}")
+                        else:
+                            st.info("ℹ️ Google Sheets not connected - results not saved")
 
                         # Mark topic as used in session state
                         current_topic_dict['used'] = True

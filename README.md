@@ -44,7 +44,15 @@ Blog Agents is a sophisticated content generation system that uses multiple AI a
 - Track used vs. unused topic ideas
 - Performance analytics by reference blog
 
-### 🚀 **Modern Interface**
+### 🚀 **Auto-Pilot Mode**
+- Generate multiple blog posts automatically without intervention
+- Queue up to 10 posts per auto-pilot run
+- Auto-generates topics if none available
+- Caches style guide for efficiency (analyzed once, reused for all posts)
+- Progress tracking with completion status
+- Error handling with continuation to next post on failure
+
+### 🖥️ **Modern Interface**
 - Clean Streamlit web interface
 - Real-time progress tracking
 - Tabbed output for easy content review (Final Post, Style Guide, Research, SEO Analysis)
@@ -100,19 +108,11 @@ python blog_orchestrator.py
 
 All models support WebSearchTool for style analysis and research:
 
-### GPT-5 Series (Recommended)
+### GPT-5 Series
+- **gpt-5.2**: Latest flagship model with best performance (recommended)
 - **gpt-5**: Main reasoning model with advanced capabilities
 - **gpt-5-mini**: Efficient version with balanced performance
 - **gpt-5-nano**: Fastest version for quick generation
-
-### GPT-4 Series
-- **gpt-4o**: Flagship multimodal model
-- **gpt-4o-mini**: Cost-effective with good performance
-- **chatgpt-4o-latest**: Latest updates and improvements
-
-### GPT-4.1 Series
-- **gpt-4.1**: Latest flagship coding-optimized model
-- **gpt-4.1-mini**: Cost-effective GPT-4.1 variant
 
 ## Workflow
 

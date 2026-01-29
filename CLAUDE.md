@@ -36,6 +36,7 @@ streamlit run app.py
 # - Real-time progress tracking
 # - Tabbed output (Final Post, Style Guide, Research, SEO Analysis)
 # - Download functionality (Markdown, HTML, Word, JSON)
+# - Auto-Pilot mode for batch generation of multiple posts
 ```
 
 ### Command Line
@@ -73,6 +74,7 @@ Central coordinator that manages seven specialized agents in a sequential workfl
 
 ### Key Methods
 - `create_blog_post()`: Main workflow method that orchestrates the full pipeline
+- `create_blog_posts_batch()`: Batch generation for auto-pilot mode (analyzes style once, reuses for all posts)
 - `analyze_blog_style()`: Standalone method for extracting style from any blog/RSS feed or specific pages
 - `generate_topic_ideas()`: AI-powered topic generation with keyword research and duplication checking
 - `extract_blog_topics()`: Extract existing topics from RSS feeds for duplication prevention
