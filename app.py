@@ -19,8 +19,46 @@ from sheets_manager import create_sheets_manager
 from keyword_research import create_keyword_researcher
 from brand_config import get_brand_config, get_all_brands, get_effective_style_source, BrandConfig
 
-# Load environment variables
-load_dotenv()
+# Load environment variables (override=True ensures .env takes precedence over system env vars)
+load_dotenv(override=True)
+
+
+def load_google_sheets_credentials():
+    """
+    Load Google Sheets credentials from environment.
+
+    Supports two methods:
+    1. GOOGLE_APPLICATION_CREDENTIALS - path to service account JSON file
+    2. GOOGLE_SERVICE_ACCOUNT_JSON - raw JSON string (for deployments)
+
+    Returns:
+        tuple: (service_account_json, spreadsheet_id) or (None, None) if not configured
+    """
+    spreadsheet_id = os.environ.get("GOOGLE_SPREADSHEET_ID", "")
+
+    # Method 1: File path
+    creds_path = os.environ.get("GOOGLE_APPLICATION_CREDENTIALS", "")
+    if creds_path:
+        # Handle relative paths - make them relative to project directory
+        if not os.path.isabs(creds_path):
+            project_dir = os.path.dirname(os.path.abspath(__file__))
+            creds_path = os.path.join(project_dir, creds_path)
+
+        if os.path.isfile(creds_path):
+            try:
+                with open(creds_path, 'r') as f:
+                    service_account_json = f.read()
+                if spreadsheet_id:
+                    return service_account_json, spreadsheet_id
+            except Exception as e:
+                print(f"Error reading credentials file: {e}")
+
+    # Method 2: Raw JSON string
+    service_account_json = os.environ.get("GOOGLE_SERVICE_ACCOUNT_JSON", "")
+    if service_account_json and spreadsheet_id:
+        return service_account_json, spreadsheet_id
+
+    return None, None
 
 @contextlib.contextmanager
 def temporary_env_var(key, value):
@@ -220,58 +258,78 @@ def main():
 
         # Google Sheets Configuration
         st.subheader("📊 Google Sheets Integration")
+
+        # Check for environment credentials
+        env_creds, env_spreadsheet_id = load_google_sheets_credentials()
+        has_env_config = bool(env_creds and env_spreadsheet_id)
+
         use_sheets = st.checkbox(
             "Enable Google Sheets storage",
-            value=False,
+            value=has_env_config,
             help="Store style guides and content in Google Sheets for persistence"
         )
 
         if use_sheets:
-            # Service Account JSON input
-            service_account_json = st.text_area(
-                "Service Account JSON",
-                height=150,
-                help="Paste your Google Service Account JSON credentials",
-                placeholder='{\n  "type": "service_account",\n  "project_id": "...",\n  ...\n}'
-            )
+            if has_env_config:
+                # Use credentials from environment
+                st.success("✅ Sheets credentials loaded from environment")
+                service_account_json = env_creds
+                spreadsheet_id = env_spreadsheet_id
 
-            # Spreadsheet ID input
-            spreadsheet_id = st.text_input(
-                "Spreadsheet ID",
-                help="Google Sheets ID from the URL",
-                placeholder="1BxiMVs0XRA5nFMdKvBdBZjgmUUqptlbs74OgvE2upms"
-            )
-
-            # Test connection button
-            if service_account_json and spreadsheet_id:
-                if st.button("🔗 Test Sheets Connection"):
+                # Auto-connect if not already connected
+                if 'sheets_manager' not in st.session_state:
                     try:
                         sheets_manager = create_sheets_manager(service_account_json, spreadsheet_id)
                         if sheets_manager:
-                            st.success("✅ Connected to Google Sheets!")
                             st.session_state.sheets_manager = sheets_manager
-                        else:
-                            st.error("❌ Failed to connect to Google Sheets")
                     except Exception as e:
                         st.error(f"❌ Connection failed: {str(e)}")
 
-                # Use existing connection if available
                 if 'sheets_manager' in st.session_state:
                     sheets_manager = st.session_state.sheets_manager
-                    # Verify connection is still valid
-                    try:
-                        if sheets_manager.test_connection():
-                            st.info("📊 Using cached Sheets connection")
-                        else:
-                            st.warning("⚠️ Cached connection invalid, please reconnect")
+                    st.info("📊 Connected to Google Sheets")
+            else:
+                # Manual input fallback
+                service_account_json = st.text_area(
+                    "Service Account JSON",
+                    height=150,
+                    help="Paste your Google Service Account JSON credentials",
+                    placeholder='{\n  "type": "service_account",\n  "project_id": "...",\n  ...\n}'
+                )
+
+                spreadsheet_id = st.text_input(
+                    "Spreadsheet ID",
+                    help="Google Sheets ID from the URL",
+                    placeholder="1BxiMVs0XRA5nFMdKvBdBZjgmUUqptlbs74OgvE2upms"
+                )
+
+                if service_account_json and spreadsheet_id:
+                    if st.button("🔗 Test Sheets Connection"):
+                        try:
+                            sheets_manager = create_sheets_manager(service_account_json, spreadsheet_id)
+                            if sheets_manager:
+                                st.success("✅ Connected to Google Sheets!")
+                                st.session_state.sheets_manager = sheets_manager
+                            else:
+                                st.error("❌ Failed to connect to Google Sheets")
+                        except Exception as e:
+                            st.error(f"❌ Connection failed: {str(e)}")
+
+                    if 'sheets_manager' in st.session_state:
+                        sheets_manager = st.session_state.sheets_manager
+                        try:
+                            if sheets_manager.test_connection():
+                                st.info("📊 Using cached Sheets connection")
+                            else:
+                                st.warning("⚠️ Cached connection invalid, please reconnect")
+                                del st.session_state.sheets_manager
+                                sheets_manager = None
+                        except Exception as e:
+                            st.warning(f"⚠️ Connection issue: {str(e)}")
                             del st.session_state.sheets_manager
                             sheets_manager = None
-                    except Exception as e:
-                        st.warning(f"⚠️ Connection issue: {str(e)}")
-                        del st.session_state.sheets_manager
-                        sheets_manager = None
-            elif use_sheets:
-                st.warning("⚠️ Please provide Service Account JSON and Spreadsheet ID")
+                else:
+                    st.warning("⚠️ Please provide Service Account JSON and Spreadsheet ID")
 
         st.markdown("---")
 
