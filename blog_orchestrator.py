@@ -920,6 +920,116 @@ IMPORTANT: Apply these brand-specific adjustments while maintaining the core for
             print(f"❌ Error extracting topics: {e}")
             return []
 
+    def create_blog_posts_batch(
+        self,
+        topics: List[Dict],
+        reference_blog: str = None,
+        status_callback=None,
+        stop_check=None,
+        product_target: str = None
+    ) -> List[Dict]:
+        """
+        Generate multiple blog posts in batch mode (for auto-pilot).
+
+        Analyzes style once and reuses for all posts.
+
+        Args:
+            topics: List of topic dicts with 'title', 'angle', 'keywords', etc.
+            reference_blog: URL of reference blog for style matching
+            status_callback: Optional callback for progress updates (message, progress)
+            stop_check: Optional callable that returns True to stop generation
+            product_target: Optional product/service to promote in posts
+
+        Returns:
+            List of result dicts, one per topic
+        """
+        results = []
+        total_topics = len(topics)
+
+        # Use effective reference blog
+        effective_reference_blog = self._get_effective_reference_blog(reference_blog)
+        if not effective_reference_blog:
+            return [{"error": "No reference blog specified and no brand configuration available"}]
+
+        # Step 1: Analyze style ONCE for all posts
+        if status_callback:
+            status_callback("🎨 Analyzing blog style (will reuse for all posts)...", 5)
+
+        try:
+            cached_style = self.analyze_blog_style(effective_reference_blog)
+        except Exception as e:
+            return [{"error": f"Failed to analyze style: {str(e)}"}]
+
+        # Step 2: Generate each post
+        for i, topic_dict in enumerate(topics):
+            # Check for stop request
+            if stop_check and stop_check():
+                if status_callback:
+                    status_callback(f"⏹️ Stopped after {i} posts", 0)
+                break
+
+            topic_title = topic_dict.get('title', f'Topic {i+1}')
+
+            # Build requirements from topic metadata
+            requirements_parts = []
+            if topic_dict.get('angle'):
+                requirements_parts.append(f"Angle: {topic_dict['angle']}")
+            if topic_dict.get('keywords'):
+                keywords = topic_dict['keywords']
+                if isinstance(keywords, list):
+                    keywords = ', '.join(keywords)
+                requirements_parts.append(f"Target Keywords: {keywords}")
+            if topic_dict.get('content_type'):
+                requirements_parts.append(f"Content Type: {topic_dict['content_type']}")
+            if topic_dict.get('rationale'):
+                requirements_parts.append(f"Rationale: {topic_dict['rationale']}")
+
+            requirements = '\n'.join(requirements_parts)
+
+            # Calculate progress for this post
+            base_progress = int((i / total_topics) * 100)
+
+            def post_status_callback(message, progress):
+                if status_callback:
+                    # Scale progress within this post's portion
+                    post_portion = 100 // total_topics
+                    overall_progress = base_progress + int((progress / 100) * post_portion)
+                    status_callback(f"Post {i+1}/{total_topics}: {message}", overall_progress)
+
+            if status_callback:
+                status_callback(f"📝 Generating post {i+1}/{total_topics}: {topic_title}", base_progress)
+
+            try:
+                # Generate post with cached style
+                post_result = self.create_blog_post(
+                    topic=topic_title,
+                    reference_blog=effective_reference_blog,
+                    requirements=requirements,
+                    status_callback=post_status_callback,
+                    cached_style_guide=cached_style,
+                    product_target=product_target
+                )
+
+                results.append({
+                    'topic': topic_title,
+                    'success': 'error' not in post_result,
+                    'results': post_result
+                })
+
+            except Exception as e:
+                results.append({
+                    'topic': topic_title,
+                    'success': False,
+                    'error': str(e)
+                })
+
+        if status_callback:
+            successful = sum(1 for r in results if r.get('success'))
+            status_callback(f"✅ Batch complete: {successful}/{len(results)} posts generated", 100)
+
+        return results
+
+
 def main():
     """CLI entry point - runs example blog post generation."""
     orchestrator = BlogAgentOrchestrator()

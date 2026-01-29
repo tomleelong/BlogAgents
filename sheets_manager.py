@@ -427,6 +427,71 @@ class SheetsManager:
             st.warning(f"Could not retrieve topic ideas: {str(e)}")
             return []
 
+    def get_unused_topic_ideas(self, source_blog: str = None, limit: int = 10, brand: str = None) -> List[Dict]:
+        """
+        Get unused topic ideas for auto-pilot mode.
+
+        Args:
+            source_blog: Optional source blog filter
+            limit: Maximum number of records to return
+            brand: Optional brand filter (uses current_brand if not specified)
+
+        Returns:
+            List of unused topic dicts formatted for auto-pilot consumption
+        """
+        try:
+            worksheet = self.spreadsheet.worksheet('Topic_Ideas')
+            records = worksheet.get_all_records()
+            brand_filter = brand or self.current_brand
+
+            # Filter by brand if specified
+            if brand_filter:
+                records = [r for r in records if r.get('Brand', '').lower() == brand_filter.lower()]
+
+            # Filter by source blog if specified
+            if source_blog:
+                records = [r for r in records if r.get('Source_Blog', '').lower() == source_blog.lower()]
+
+            # Filter for unused topics only (Status is 'Generated', not 'Used')
+            unused_records = [
+                r for r in records
+                if r.get('Status', '').lower() != 'used'
+            ]
+
+            # Sort by date (most recent first) and limit
+            sorted_records = sorted(
+                unused_records,
+                key=lambda x: x.get('Date_Created', ''),
+                reverse=True
+            )
+
+            # Convert to format expected by auto-pilot
+            result = []
+            for record in sorted_records[:limit]:
+                # Parse keywords from comma-separated string back to list
+                keywords_str = record.get('Keywords', '')
+                keywords = [k.strip() for k in keywords_str.split(',') if k.strip()]
+
+                topic_dict = {
+                    'ID': record.get('ID', ''),
+                    'title': record.get('Title', ''),
+                    'angle': record.get('Angle', ''),
+                    'keywords': keywords,
+                    'content_type': record.get('Content_Type', ''),
+                    'rationale': record.get('Rationale', ''),
+                    'search_volume': record.get('Search_Volume', 'N/A'),
+                    'competition': record.get('Competition', 'N/A'),
+                    'trend_score': record.get('Trend_Score', 0),
+                    'used': False
+                }
+                result.append(topic_dict)
+
+            return result
+
+        except Exception as e:
+            print(f"Could not retrieve unused topic ideas: {str(e)}")
+            return []
+
     def mark_topic_used(self, topic_id: str):
         """Mark a topic idea as used"""
         try:

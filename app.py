@@ -171,6 +171,108 @@ def validate_blog_url(url):
 MAX_TOPIC_LENGTH = 500
 MAX_REQUIREMENTS_LENGTH = 2000
 MAX_API_KEY_LENGTH = 200
+MAX_AUTOPILOT_POSTS = 10
+
+
+def get_available_topics_for_autopilot(session_state, sheets_manager=None):
+    """
+    Gather available topics for auto-pilot from session state and Google Sheets.
+
+    Args:
+        session_state: Streamlit session state
+        sheets_manager: Optional SheetsManager instance
+
+    Returns:
+        List of topic dicts available for generation
+    """
+    available_topics = []
+
+    # First, check session-generated topics (unused ones)
+    if 'generated_topics' in session_state and session_state.generated_topics:
+        for topic in session_state.generated_topics:
+            # Check if topic has been marked as used
+            if not topic.get('used', False):
+                available_topics.append(topic)
+
+    # If sheets enabled, also check for cached topics
+    if sheets_manager and len(available_topics) < MAX_AUTOPILOT_POSTS:
+        try:
+            # Get unused topics from Google Sheets
+            cached_topics = sheets_manager.get_unused_topic_ideas(
+                limit=MAX_AUTOPILOT_POSTS - len(available_topics)
+            )
+            if cached_topics:
+                # Convert to standard format and avoid duplicates
+                existing_titles = {t['title'].lower() for t in available_topics}
+                for cached in cached_topics:
+                    if cached.get('title', '').lower() not in existing_titles:
+                        available_topics.append(cached)
+        except Exception as e:
+            print(f"Could not fetch cached topics from Sheets: {e}")
+
+    return available_topics[:MAX_AUTOPILOT_POSTS]
+
+
+def build_requirements_from_topic(topic_dict):
+    """
+    Convert topic metadata to requirements string for blog generation.
+
+    Args:
+        topic_dict: Topic dictionary with angle, keywords, content_type, rationale
+
+    Returns:
+        Formatted requirements string
+    """
+    requirements_parts = []
+
+    if topic_dict.get('angle'):
+        requirements_parts.append(f"Angle: {topic_dict['angle']}")
+
+    if topic_dict.get('keywords'):
+        keywords = topic_dict['keywords']
+        if isinstance(keywords, list):
+            keywords = ', '.join(keywords)
+        requirements_parts.append(f"Target Keywords: {keywords}")
+
+    if topic_dict.get('content_type'):
+        requirements_parts.append(f"Content Type: {topic_dict['content_type']}")
+
+    if topic_dict.get('rationale'):
+        requirements_parts.append(f"Rationale: {topic_dict['rationale']}")
+
+    return '\n'.join(requirements_parts)
+
+
+def initialize_autopilot_state(session_state):
+    """Initialize all auto-pilot related session state keys."""
+    defaults = {
+        'autopilot_active': False,
+        'autopilot_stop_requested': False,
+        'autopilot_total_posts': 0,
+        'autopilot_completed_posts': 0,
+        'autopilot_current_topic': None,
+        'autopilot_topics_queue': [],
+        'autopilot_results': [],
+        'autopilot_errors': [],
+        'autopilot_cached_style': None,
+    }
+    for key, default_value in defaults.items():
+        if key not in session_state:
+            session_state[key] = default_value
+
+
+def reset_autopilot_state(session_state):
+    """Reset auto-pilot state for a new run."""
+    session_state.autopilot_active = False
+    session_state.autopilot_stop_requested = False
+    session_state.autopilot_total_posts = 0
+    session_state.autopilot_completed_posts = 0
+    session_state.autopilot_current_topic = None
+    session_state.autopilot_topics_queue = []
+    session_state.autopilot_results = []
+    session_state.autopilot_errors = []
+    session_state.autopilot_cached_style = None
+
 
 def main():
     """Streamlit web app entry point - renders the blog generation interface."""
@@ -179,6 +281,9 @@ def main():
         page_icon="✍️",
         layout="wide"
     )
+
+    # Initialize auto-pilot session state
+    initialize_autopilot_state(st.session_state)
 
     # Initialize sheets_manager at function level
     sheets_manager = None
@@ -434,7 +539,186 @@ def main():
             except ValueError as e:
                 st.error(f"🚫 Invalid blog URL: {e}")
                 st.stop()
-    
+
+    # ============================================================
+    # AUTO-PILOT EXECUTION LOOP
+    # ============================================================
+    if st.session_state.autopilot_active:
+        # Check for stop request
+        if st.session_state.autopilot_stop_requested:
+            st.session_state.autopilot_active = False
+            st.session_state.autopilot_stop_requested = False
+            st.success("⏹️ Auto-pilot stopped by user request")
+        # Check if we need to auto-generate topics first
+        elif st.session_state.get('autopilot_needs_topics', False):
+            with st.spinner("💡 Auto-generating topics for auto-pilot..."):
+                with temporary_env_var("OPENAI_API_KEY", api_key):
+                    orchestrator = BlogAgentOrchestrator(model=model, brand_config=brand_config)
+
+                    # Generate topics using the topic generator
+                    topics = orchestrator.generate_topic_ideas(
+                        reference_blog,
+                        preferences="",
+                        status_callback=None,
+                        trending_keywords=None,
+                        product_target=None,
+                        existing_topics=None
+                    )
+
+                    if topics:
+                        # Queue the generated topics
+                        st.session_state.autopilot_topics_queue = topics[:st.session_state.autopilot_total_posts]
+                        st.session_state.generated_topics = topics  # Also store for display
+                        st.session_state.autopilot_needs_topics = False
+                        st.success(f"✅ Generated {len(topics)} topics for auto-pilot")
+                        st.rerun()
+                    else:
+                        st.error("❌ Failed to generate topics. Please generate topics manually first.")
+                        st.session_state.autopilot_active = False
+                        st.session_state.autopilot_needs_topics = False
+
+        # Check if all posts are completed
+        elif st.session_state.autopilot_completed_posts >= st.session_state.autopilot_total_posts:
+            st.session_state.autopilot_active = False
+            st.balloons()
+            st.success(f"🎉 Auto-pilot completed! Generated {st.session_state.autopilot_completed_posts} posts.")
+
+        # Check if there are topics in the queue to process
+        elif st.session_state.autopilot_topics_queue:
+            # Get next topic from queue
+            current_topic_dict = st.session_state.autopilot_topics_queue.pop(0)
+            topic_title = current_topic_dict.get('title', 'Untitled Topic')
+            st.session_state.autopilot_current_topic = topic_title
+
+            # Build requirements from topic metadata
+            topic_requirements = build_requirements_from_topic(current_topic_dict)
+
+            # Get product target if available
+            autopilot_product_target = st.session_state.get('topic_gen_product_target', '')
+
+            # Create progress display
+            post_num = st.session_state.autopilot_completed_posts + 1
+            total_posts = st.session_state.autopilot_total_posts
+
+            progress_container = st.container()
+            with progress_container:
+                st.markdown(f"### 🔄 Auto-Pilot: Post {post_num}/{total_posts}")
+                st.markdown(f"**Topic:** {topic_title}")
+                progress_bar = st.progress(0)
+                status_text = st.empty()
+
+                def update_autopilot_status(message, progress):
+                    status_text.text(f"🔄 Post {post_num}/{total_posts}: {message}")
+                    progress_bar.progress(progress)
+
+            try:
+                with temporary_env_var("OPENAI_API_KEY", api_key):
+                    orchestrator = BlogAgentOrchestrator(model=model, brand_config=brand_config)
+
+                    # Use cached style guide if available, otherwise analyze once and cache
+                    cached_style = st.session_state.autopilot_cached_style
+
+                    # Check for style guide from sheets if not cached yet
+                    if not cached_style and sheets_manager:
+                        try:
+                            sheets_cached = sheets_manager.get_cached_style_guide(reference_blog)
+                            if sheets_cached:
+                                cached_style = sheets_cached['style_guide']
+                                st.session_state.autopilot_cached_style = cached_style
+                        except Exception:
+                            pass
+
+                    # Generate the blog post
+                    results = orchestrator.create_blog_post(
+                        topic=topic_title,
+                        reference_blog=reference_blog,
+                        requirements=topic_requirements,
+                        status_callback=update_autopilot_status,
+                        cached_style_guide=cached_style,
+                        product_target=autopilot_product_target if autopilot_product_target else None,
+                        specific_pages=None
+                    )
+
+                    # Cache the style guide for subsequent posts
+                    if not st.session_state.autopilot_cached_style and 'style_guide' in results:
+                        st.session_state.autopilot_cached_style = results['style_guide']
+
+                    # Process results
+                    if 'error' in results:
+                        # Record error
+                        st.session_state.autopilot_errors.append({
+                            'topic': topic_title,
+                            'error': results['error']
+                        })
+                        st.session_state.autopilot_results.append({
+                            'topic': topic_title,
+                            'success': False,
+                            'error': results['error']
+                        })
+                    else:
+                        # Record success
+                        st.session_state.autopilot_results.append({
+                            'topic': topic_title,
+                            'success': True,
+                            'results': results
+                        })
+
+                        # Save to Google Sheets if enabled
+                        if sheets_manager:
+                            try:
+                                # Save style guide if this is the first post
+                                if post_num == 1 and 'style_guide' in results:
+                                    sheets_manager.save_style_guide(reference_blog, results['style_guide'])
+
+                                # Save generated content
+                                sheets_manager.save_generated_content(
+                                    topic_title,
+                                    reference_blog,
+                                    results
+                                )
+
+                                # Update blog source stats
+                                sheets_manager.update_blog_source_stats(reference_blog, success=True)
+
+                                # Mark topic as used
+                                if 'ID' in current_topic_dict:
+                                    sheets_manager.mark_topic_used(current_topic_dict['ID'])
+                            except Exception as e:
+                                print(f"Could not save to Sheets: {e}")
+
+                        # Mark topic as used in session state
+                        current_topic_dict['used'] = True
+
+                    # Update completion count
+                    st.session_state.autopilot_completed_posts += 1
+                    st.session_state.autopilot_current_topic = None
+
+            except Exception as e:
+                # Record error
+                st.session_state.autopilot_errors.append({
+                    'topic': topic_title,
+                    'error': str(e)
+                })
+                st.session_state.autopilot_results.append({
+                    'topic': topic_title,
+                    'success': False,
+                    'error': str(e)
+                })
+                st.session_state.autopilot_completed_posts += 1
+                st.session_state.autopilot_current_topic = None
+
+            # Trigger next iteration
+            st.rerun()
+
+        else:
+            # No more topics in queue
+            st.session_state.autopilot_active = False
+            st.warning("⚠️ Auto-pilot stopped: No more topics in queue")
+
+    # ============================================================
+    # MAIN CONTENT AREA
+    # ============================================================
+
     # Main content area
     col1, col2 = st.columns([1, 1])
 
@@ -651,6 +935,105 @@ Rationale: {topic_idea.get('rationale', 'N/A')}"""
                                 st.warning(f"⚠️ Could not mark topic as used: {str(e)}")
 
                         st.rerun()
+
+        st.markdown("---")
+
+        # Auto-Pilot Mode Section
+        st.subheader("🚀 Auto-Pilot Mode")
+        st.caption("Generate multiple blog posts automatically without intervention")
+
+        # Get available topics for preview
+        available_topics = get_available_topics_for_autopilot(st.session_state, sheets_manager)
+        topics_available_count = len(available_topics)
+
+        # Show topic availability status
+        if topics_available_count > 0:
+            st.success(f"✅ {topics_available_count} topics available for auto-pilot")
+        else:
+            st.info("💡 No topics available - will auto-generate topics when started")
+
+        # Number of posts slider
+        max_posts = min(topics_available_count, MAX_AUTOPILOT_POSTS) if topics_available_count > 0 else MAX_AUTOPILOT_POSTS
+        num_posts = st.slider(
+            "Number of posts to generate",
+            min_value=1,
+            max_value=max_posts if max_posts > 0 else MAX_AUTOPILOT_POSTS,
+            value=min(3, max_posts) if max_posts > 0 else 3,
+            help=f"Maximum {MAX_AUTOPILOT_POSTS} posts per auto-pilot run"
+        )
+
+        # Topics preview expander
+        if topics_available_count > 0:
+            with st.expander(f"📋 Preview queued topics ({min(num_posts, topics_available_count)} of {topics_available_count})"):
+                for i, topic_item in enumerate(available_topics[:num_posts]):
+                    st.markdown(f"**{i+1}.** {topic_item.get('title', 'Untitled')}")
+                    if topic_item.get('angle'):
+                        st.caption(f"   Angle: {topic_item['angle']}")
+
+        # Auto-pilot control buttons
+        col_start, col_stop = st.columns(2)
+
+        with col_start:
+            start_disabled = st.session_state.autopilot_active
+            if st.button(
+                "▶️ Start Auto-Pilot",
+                type="primary",
+                disabled=start_disabled or not api_key,
+                help="Start generating blog posts automatically"
+            ):
+                # Initialize auto-pilot
+                if topics_available_count == 0:
+                    # Need to auto-generate topics first
+                    st.session_state.autopilot_needs_topics = True
+                else:
+                    # Queue up topics
+                    st.session_state.autopilot_topics_queue = available_topics[:num_posts].copy()
+
+                st.session_state.autopilot_active = True
+                st.session_state.autopilot_stop_requested = False
+                st.session_state.autopilot_total_posts = num_posts
+                st.session_state.autopilot_completed_posts = 0
+                st.session_state.autopilot_results = []
+                st.session_state.autopilot_errors = []
+                st.session_state.autopilot_cached_style = None
+                st.rerun()
+
+        with col_stop:
+            stop_disabled = not st.session_state.autopilot_active
+            if st.button(
+                "⏹️ Stop Auto-Pilot",
+                disabled=stop_disabled,
+                help="Stop after current post completes"
+            ):
+                st.session_state.autopilot_stop_requested = True
+                st.warning("⏹️ Stop requested - will stop after current post completes")
+
+        # Show auto-pilot progress when active
+        if st.session_state.autopilot_active:
+            st.markdown("---")
+            st.markdown("### 🔄 Auto-Pilot Progress")
+
+            # Overall progress bar
+            progress_pct = st.session_state.autopilot_completed_posts / st.session_state.autopilot_total_posts
+            st.progress(progress_pct)
+            st.markdown(f"**{st.session_state.autopilot_completed_posts}/{st.session_state.autopilot_total_posts}** posts completed")
+
+            # Current topic being processed
+            if st.session_state.autopilot_current_topic:
+                st.info(f"🔄 Currently processing: **{st.session_state.autopilot_current_topic}**")
+
+            # Completed posts list
+            if st.session_state.autopilot_results:
+                with st.expander(f"✅ Completed posts ({len(st.session_state.autopilot_results)})", expanded=False):
+                    for i, result in enumerate(st.session_state.autopilot_results):
+                        status_icon = "✅" if result.get('success') else "❌"
+                        st.markdown(f"{status_icon} **{i+1}.** {result.get('topic', 'Unknown')}")
+
+            # Error list
+            if st.session_state.autopilot_errors:
+                with st.expander(f"❌ Errors ({len(st.session_state.autopilot_errors)})", expanded=True):
+                    for error in st.session_state.autopilot_errors:
+                        st.error(f"**{error.get('topic', 'Unknown')}**: {error.get('error', 'Unknown error')}")
 
         st.markdown("---")
 
@@ -1089,6 +1472,95 @@ Rationale: {topic_idea.get('rationale', 'N/A')}"""
                 st.info("No blog source statistics available")
         except Exception as e:
             st.error(f"❌ Could not load content history: {str(e)}")
+
+    # Auto-Pilot Results Section
+    if st.session_state.autopilot_results:
+        st.markdown("---")
+        st.header("🚀 Auto-Pilot Results")
+
+        # Summary metrics
+        total_results = len(st.session_state.autopilot_results)
+        successful = sum(1 for r in st.session_state.autopilot_results if r.get('success'))
+        failed = total_results - successful
+
+        col_metric1, col_metric2, col_metric3 = st.columns(3)
+        with col_metric1:
+            st.metric("Total Generated", total_results)
+        with col_metric2:
+            st.metric("Successful", successful, delta=None)
+        with col_metric3:
+            st.metric("Failed", failed, delta=None, delta_color="inverse" if failed > 0 else "off")
+
+        # Expandable results for each post
+        for i, result in enumerate(st.session_state.autopilot_results):
+            topic_name = result.get('topic', f'Post {i+1}')
+            status_icon = "✅" if result.get('success') else "❌"
+
+            with st.expander(f"{status_icon} {topic_name}", expanded=False):
+                if result.get('success') and 'results' in result:
+                    post_results = result['results']
+
+                    # Show tabs for this post's content
+                    ap_tab1, ap_tab2, ap_tab3 = st.tabs(["📄 Final Post", "🎨 Style Guide", "📊 SEO Analysis"])
+
+                    with ap_tab1:
+                        if 'final' in post_results:
+                            st.markdown(post_results['final'])
+
+                            # Download buttons
+                            dl_col1, dl_col2 = st.columns(2)
+                            with dl_col1:
+                                st.download_button(
+                                    label="📄 Download as Text",
+                                    data=post_results['final'],
+                                    file_name=f"autopilot_{topic_name[:30].replace(' ', '_').lower()}.txt",
+                                    mime="text/plain",
+                                    key=f"ap_dl_txt_{i}",
+                                    use_container_width=True
+                                )
+                            with dl_col2:
+                                st.download_button(
+                                    label="📝 Download as Markdown",
+                                    data=post_results['final'],
+                                    file_name=f"autopilot_{topic_name[:30].replace(' ', '_').lower()}.md",
+                                    mime="text/markdown",
+                                    key=f"ap_dl_md_{i}",
+                                    use_container_width=True
+                                )
+                        else:
+                            st.info("Final content not available")
+
+                    with ap_tab2:
+                        if 'style_guide' in post_results:
+                            st.text_area(
+                                "Style Guide",
+                                value=post_results['style_guide'],
+                                height=300,
+                                disabled=False,
+                                key=f"ap_style_{i}"
+                            )
+                        else:
+                            st.info("Style guide not available")
+
+                    with ap_tab3:
+                        if 'seo_analysis' in post_results:
+                            st.text_area(
+                                "SEO Analysis",
+                                value=post_results['seo_analysis'],
+                                height=300,
+                                disabled=False,
+                                key=f"ap_seo_{i}"
+                            )
+                        else:
+                            st.info("SEO analysis not available")
+                else:
+                    st.error(f"Error: {result.get('error', 'Unknown error')}")
+
+        # Clear results button
+        if st.button("🗑️ Clear Auto-Pilot Results", help="Remove all auto-pilot results from this session"):
+            st.session_state.autopilot_results = []
+            st.session_state.autopilot_errors = []
+            st.rerun()
 
     # Footer
     st.markdown("---")
